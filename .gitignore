@@ -1,0 +1,16 @@
+node_modules/
+dist/
+runtime/
+data/
+data-smoke/
+导出/
+github/
+*.log
+
+# 本地产出的临时文件
+~$*.xlsx
+data/error.log
+
+# 含真实数据的原始文件，不要进版本库
+*真实*
+*勿传*

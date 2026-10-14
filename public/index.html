@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self';" />
+  <title>门诊排班</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <span>门诊排班</span>
+    </div>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-tab="schedule">排班表</button>
+      <button class="tab" data-tab="doctors">医生资料</button>
+      <button class="tab" data-tab="rooms">诊室设置</button>
+      <button class="tab" data-tab="settings">科室设置</button>
+    </nav>
+
+    <div class="topbar-right">
+      <span class="status" id="saveStatus">已保存</span>
+      <button class="btn btn-ghost" id="btnImport" title="从旧排班表 Excel 导入 (Ctrl+I)">导入旧表</button>
+      <button class="btn btn-ghost" id="btnSave" title="保存到本地 (Ctrl+S)">保存</button>
+      <button class="btn btn-primary" id="btnExport" title="按模板导出排班表 (Ctrl+E)">导出排班表</button>
+      <button class="btn btn-icon" id="btnHelp" title="使用说明">?</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- ================= 排班表 ================= -->
+    <section class="page active" id="page-schedule">
+      <div class="sched-toolbar">
+        <div class="month-picker">
+          <button class="btn btn-icon" id="btnPrevMonth" title="上个月">‹</button>
+          <select id="selYear" class="input"></select>
+          <span class="unit">年</span>
+          <select id="selMonth" class="input"></select>
+          <span class="unit">月</span>
+          <button class="btn btn-icon" id="btnNextMonth" title="下个月">›</button>
+        </div>
+
+        <div class="toolbar-sep"></div>
+
+        <div class="tool-group">
+          <label class="lbl">操作模式</label>
+          <div class="segmented" id="modeSwitch">
+            <button class="seg active" data-mode="paint">画笔排班</button>
+            <button class="seg" data-mode="pick">仅选择</button>
+          </div>
+        </div>
+
+        <div class="tool-group grow">
+          <label class="lbl">当前医生</label>
+          <div class="brush-bar" id="brushBar">
+            <span class="brush-empty" id="brushEmpty">从下面点一位医生，再点格子或拖动即可排班</span>
+          </div>
+        </div>
+
+        <div class="tool-group">
+          <button class="btn btn-ghost" id="btnUndo" title="撤销 (Ctrl+Z)">撤销</button>
+          <button class="btn btn-ghost" id="btnRedo" title="重做 (Ctrl+Shift+Z)">重做</button>
+          <button class="btn btn-ghost" id="btnClearMonth" title="清空本月全部排班">清空本月</button>
+        </div>
+      </div>
+
+      <div class="brush-toolbar">
+        <span class="lbl">排班医生</span>
+        <div class="palette-bar" id="palette"></div>
+      </div>
+
+      <div class="sched-body">
+        <div class="grid-wrap" id="gridWrap">
+          <div class="grid-header-row" id="gridHead"></div>
+          <div class="grid-scroll" id="gridScroll">
+            <div class="loading" id="gridLoading">正在读取排班…</div>
+          </div>
+        </div>
+
+        <aside class="side">
+          <div class="side-block">
+            <div class="side-title">本月进度</div>
+            <div class="progress-wrap">
+              <div class="progress"><div class="progress-bar" id="progBar"></div></div>
+              <div class="progress-text" id="progText">—</div>
+            </div>
+            <div class="warn-list" id="warnList"></div>
+          </div>
+
+          <div class="side-block">
+            <div class="side-title">医生班次统计</div>
+            <div class="table-scroll" id="statDoctors"></div>
+          </div>
+
+          <div class="side-block">
+            <div class="side-title">诊室占用</div>
+            <div class="table-scroll" id="statRooms"></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ================= 医生资料 ================= -->
+    <section class="page" id="page-doctors">
+      <div class="page-head">
+        <div>
+          <h2>医生资料</h2>
+          <p class="sub">改动会自动保存，不用手动按保存。编号和号别会原样写进导出的表；编号留空时导出该格为空。</p>
+        </div>
+        <div class="page-head-actions">
+          <span class="save-hint" id="doctorSaveHint"></span>
+          <button class="btn btn-ghost" id="btnAddDoctor">+ 新增医生</button>
+        </div>
+      </div>
+      <div class="card card-scroll">
+        <table class="data-table" id="doctorTable">
+          <thead>
+            <tr>
+              <th style="width:52px">颜色</th>
+              <th style="width:110px">姓名</th>
+              <th style="width:120px">门诊编号</th>
+              <th style="width:150px">号别名称</th>
+              <th style="width:158px">默认诊室</th>
+              <th>备注</th>
+              <th style="width:70px">操作</th>
+            </tr>
+          </thead>
+          <tbody id="doctorTbody"></tbody>
+        </table>
+        <div class="empty-block" id="doctorEmpty" hidden>还没有医生，点「新增医生」或先「导入旧表」。</div>
+      </div>
+    </section>
+
+    <!-- ================= 诊室设置 ================= -->
+    <section class="page" id="page-rooms">
+      <div class="page-head">
+        <div>
+          <h2>诊室设置</h2>
+          <p class="sub">排班表的列就是这里的诊室，顺序可以上下调整。诊室名称会写进导出表的「诊室名称」列。</p>
+        </div>
+        <div class="page-head-actions">
+          <button class="btn btn-ghost" id="btnAddRoom">+ 新增诊室</button>
+          <button class="btn btn-primary" id="btnSaveRooms">保存诊室设置</button>
+        </div>
+      </div>
+      <div class="card">
+        <table class="data-table" id="roomTable">
+          <thead>
+            <tr>
+              <th style="width:60px">顺序</th>
+              <th style="width:150px">简名（排班表列头）</th>
+              <th style="width:260px">诊室名称（导出排班表用）</th>
+              <th style="width:160px">该诊室常驻医生</th>
+              <th style="width:70px">操作</th>
+            </tr>
+          </thead>
+          <tbody id="roomTbody"></tbody>
+        </table>
+        <div class="empty-block" id="roomEmpty" hidden>还没有诊室，点「新增诊室」。</div>
+      </div>
+    </section>
+
+    <!-- ================= 科室设置 ================= -->
+    <section class="page" id="page-settings">
+      <div class="page-head">
+        <div>
+          <h2>科室设置</h2>
+          <p class="sub">这些值会填进导出表里对应的列。</p>
+        </div>
+        <div class="page-head-actions">
+          <button class="btn btn-primary" id="btnSaveSettings">保存设置</button>
+        </div>
+      </div>
+
+      <div class="card card-form">
+        <h3>导出排班表的固定字段</h3>
+        <p class="sub">按你所在科室填，会写进导出表的对应列。留空则该列为空，之后再填也行。</p>
+        <div class="form-grid">
+          <label>机构名称
+            <input class="input" id="setOrgName" placeholder="可不填，导出该列为空" />
+          </label>
+          <label>坐诊科室名称
+            <input class="input" id="setDeptName" placeholder="如 心血管内科、呼吸内科" />
+          </label>
+          <label>分诊台名称
+            <input class="input" id="setTriageDesk" placeholder="如 门诊分诊台、内科分诊台" />
+          </label>
+        </div>
+
+        <h3>班次时间</h3>
+        <p class="sub">导出的「班次开始时间 / 班次结束时间」按这里的时刻生成，日期自动跟随当天的号源日期。</p>
+        <table class="data-table" id="shiftTable">
+          <thead>
+            <tr>
+              <th style="width:120px">班次</th>
+              <th style="width:160px">开始时间</th>
+              <th style="width:160px">结束时间</th>
+            </tr>
+          </thead>
+          <tbody id="shiftTbody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-foot">
+    <span>门诊排班</span>
+    <span class="foot-sep">·</span>
+    <span>作者 <a href="https://github.com/yakoylp" target="_blank" rel="noreferrer">yakoylp</a></span>
+    <span class="foot-sep">·</span>
+    <span>本地离线运行，数据不出本机</span>
+  </footer>
+
+  <!-- ================= 弹窗：导入 ================= -->
+  <div class="modal" id="modalImport" hidden>
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3>导入旧排班表</h3>
+        <button class="btn btn-icon" data-close="modalImport">×</button>
+      </div>
+      <div class="modal-body" id="importBody"></div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" data-close="modalImport">取消</button>
+        <button class="btn btn-primary" id="btnImportConfirm" disabled>确认导入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 弹窗：导出 ================= -->
+  <div class="modal" id="modalExport" hidden>
+    <div class="modal-box modal-wide">
+      <div class="modal-head">
+        <h3>导出排班表</h3>
+        <button class="btn btn-icon" data-close="modalExport">×</button>
+      </div>
+      <div class="modal-body" id="exportBody"></div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" data-close="modalExport">关闭</button>
+        <button class="btn btn-primary" id="btnExportConfirm">导出到 Excel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 弹窗：说明 ================= -->
+  <div class="modal" id="modalHelp" hidden>
+    <div class="modal-box modal-wide">
+      <div class="modal-head">
+        <h3 id="helpTitle">使用说明</h3>
+        <button class="btn btn-icon" data-close="modalHelp">×</button>
+      </div>
+      <div class="modal-body" id="helpBody"></div>
+      <div class="modal-foot">
+        <button class="btn btn-primary" data-close="modalHelp">知道了</button>
+      </div>
+    </div>
+  </div>
+
+  <datalist id="titleOptions">
+    <option value="医师"></option>
+    <option value="主治医师"></option>
+    <option value="副主任医师"></option>
+    <option value="主任医师"></option>
+    <option value="专科医师"></option>
+    <option value="护师"></option>
+  </datalist>
+
+  <div class="toast-wrap" id="toastWrap"></div>
+
+  <script src="js/util.js"></script>
+  <script src="js/state.js"></script>
+  <script src="js/schedule.js"></script>
+  <script src="js/doctors.js"></script>
+  <script src="js/settings.js"></script>
+  <script src="js/modals.js"></script>
+  <script src="js/app.js"></script>
+</body>
+
+</html>

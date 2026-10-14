@@ -1,0 +1,91 @@
+{
+  "name": "clinic-scheduling",
+  "version": "1.0.0",
+  "private": true,
+  "description": "门诊医生可视化排班工具（本地离线桌面应用，各科室通用）",
+  "author": "yakoylp (https://github.com/yakoylp)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yakoylp/clinic-scheduling.git"
+  },
+  "homepage": "https://github.com/yakoylp/clinic-scheduling#readme",
+  "keywords": [
+    "scheduling",
+    "clinic",
+    "outpatient",
+    "electron",
+    "excel"
+  ],
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test:export": "node scripts/test-export.js",
+    "test:api": "node scripts/test-api.js",
+    "test:ui": "node scripts/make-smoke-data.js && node scripts/test-ui.js",
+    "test:ux": "node scripts/test-ux.js",
+    "test": "node scripts/test-export.js && node scripts/test-api.js && npm run test:ui && node scripts/test-ux.js",
+    "reset": "node scripts/reset-data.js",
+    "make:fixtures": "node scripts/make-smoke-data.js && node scripts/make-bad-fixture.js",
+    "fetch:python": "pwsh -ExecutionPolicy Bypass -File scripts/fetch-python.ps1",
+    "dist": "electron-builder --win --x64"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^26.15.3",
+    "jsdom": "^30.1.2"
+  },
+  "build": {
+    "appId": "local.derm.scheduling",
+    "productName": "门诊排班",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**/*",
+      "lib/**/*",
+      "public/**/*",
+      "tools/**/*",
+      "scripts/**/*",
+      "门诊排班模板.xlsx",
+      "package.json",
+      "!data/**/*",
+      "!data-smoke/**/*",
+      "!导出/**/*",
+      "!dist/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "runtime",
+        "to": "runtime",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "dir",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "portable": {
+      "artifactName": "门诊排班-便携版-${version}.exe"
+    }
+  }
+}
