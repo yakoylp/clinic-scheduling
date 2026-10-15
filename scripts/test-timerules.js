@@ -177,6 +177,32 @@ console.log('== 6. 格子级时间设置（优先级最高） ==');
   check('只填结束时间也保留', JSON.stringify(store.normalizeSlotRule({ start: '', end: '11:30' })), '{"start":"","end":"11:30:00"}');
 }
 
+console.log('== 6b. 脏 / 失效的格子级设置会被清理 ==');
+{
+  const schedule = {
+    version: 1,
+    settings: store.DEFAULT_SETTINGS,
+    rooms: [{ id: 'room1', name: '诊室1', short: '诊室1', order: 1 }],
+    shifts: store.DEFAULT_SHIFTS.slice(),
+    months: {},
+  };
+  store.reconcileMonth(schedule, '2027-06');
+  const month = schedule.months['2027-06'];
+  month.slotRules = {
+    '2027-06-01|上午|room1': { start: '09:00:00', end: '' },      // 正常，保留
+    '2027-06-02|上午|room1': { start: '25:00:00', end: '' },      // 非法时间，整条丢掉
+    '2027-06-03|上午|room_gone': { start: '10:00:00', end: '' },  // 诊室不存在，丢掉
+    '2027-05-01|上午|room1': { start: '10:00:00', end: '' },      // 不在本月，丢掉
+    '2027-06-04|上午|room1': { start: '', end: '' },              // 空值，丢掉
+  };
+  const { month: reconciled } = store.reconcileMonth(schedule, '2027-06');
+  const keys = Object.keys(reconciled.slotRules);
+  check('只留下 1 条有效设置', keys.length, 1);
+  check('留下的是合法那条', keys[0], '2027-06-01|上午|room1');
+  check('合法那条的值没被动', reconciled.slotRules['2027-06-01|上午|room1'].start, '09:00:00');
+  checkTrue('非法时间没进导出', !JSON.stringify(reconciled.slotRules).includes('25:00'));
+}
+
 console.log('== 7. handlers 存 / 清格子时间，并且导出用得上 ==');
 {
   const BACKUP = path.join(os.tmpdir(), `derm-slotrule-backup-${process.pid}`);
