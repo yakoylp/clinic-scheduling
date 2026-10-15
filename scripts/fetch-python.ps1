@@ -74,7 +74,8 @@ foreach ($pkg in $wheels) {
   if (-not $file) { throw "找不到 $($pkg.name) 的通用 wheel" }
   $whl = Join-Path $tmp $file.filename
   Invoke-WebRequest -Uri $file.url -OutFile $whl -TimeoutSec 120
-  [System.IO.Compression.ZipFile]::ExtractToDirectory($whl, $sitePackages, $true)
+  # Windows PowerShell 5.1 的 ExtractToDirectory 只有两个参数（没有 overwrite）
+  [System.IO.Compression.ZipFile]::ExtractToDirectory($whl, $sitePackages)
 }
 
 $python = Join-Path $target 'python.exe'

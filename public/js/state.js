@@ -78,6 +78,74 @@ const App = {
     return this.month.slots[this.slotKey(date, shift, roomId)] || null;
   },
 
+  /**
+   * 某个格子实际用的起止时间。
+   * 现场按「当前排班 + 格子级设置 + 医生级周规律」算，而不是读主进程给的快照——
+   * 用户刚改完格子或规律，快照就已经过时了，时间标记会画错。
+   * 优先级与 lib/store.js 的 resolveCellShiftTime 保持一致。
+   * @param key '日期|班次|诊室id'
+   * @returns {{ start, end, customized, source }}
+   */
+  slotTime(key) {
+    if (typeof key !== 'string' || !key.includes('|')) return null;
+    const [date, shift, roomId] = key.split('|');
+    if (!this.month || !(key in this.month.slots)) return null;
+    return this.shiftTimeFor(date, shift, roomId);
+  },
+
+  /** 格子级时间设置：'日期|班次|诊室id' -> { start, end } */
+  slotRules() {
+    return (this.month && this.month.slotRules) || {};
+  },
+
+  /** 某位医生在某天某班次的实际上班时间（和 lib/store.js 的 effectiveShiftTime 同一套规则） */
+  shiftTimeFor(date, shiftName, roomId) {
+    const conf = (this.snapshot.shifts || []).find((s) => s.name === shiftName) || {};
+    const base = { start: conf.start || '', end: conf.end || '' };
+    const key = this.slotKey(date, shiftName, roomId);
+
+    // 1) 格子自己的设置优先
+    const cellRule = this.slotRules()[key];
+    if (cellRule && (cellRule.start || cellRule.end)) {
+      return {
+        start: cellRule.start || base.start,
+        end: cellRule.end || base.end,
+        customized: true,
+        source: 'cell',
+      };
+    }
+
+    // 2) 医生级周规律
+    const docId = this.slot(date, shiftName, roomId);
+    const doc = docId ? this.doctor(docId) : null;
+    const [y, m, d] = String(date).split('-').map(Number);
+    const wd = new Date(y, m - 1, d).getDay();
+    for (const rule of (doc && doc.timeRules) || []) {
+      if (!Array.isArray(rule.days) || !rule.days.includes(wd)) continue;
+      const hit = rule.shifts && rule.shifts[shiftName];
+      if (!hit) continue;
+      return {
+        start: hit.start || base.start,
+        end: hit.end || base.end,
+        customized: true,
+        source: 'doctor',
+      };
+    }
+
+    // 3) 班次默认
+    return Object.assign(base, { customized: false, source: 'shift' });
+  },
+
+  /** 整月所有格子的实际时间，按 '日期|班次|诊室id' 索引 */
+  allSlotTimes() {
+    const out = {};
+    if (!this.month) return out;
+    for (const key of Object.keys(this.month.slots)) {
+      out[key] = this.slotTime(key) || { start: '', end: '', customized: false };
+    }
+    return out;
+  },
+
   /* ---------------- 月份 ---------------- */
   async loadMonth(ym) {
     if (ym) this.ym = ym;

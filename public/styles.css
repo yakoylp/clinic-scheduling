@@ -204,6 +204,12 @@ main { flex: 1 1 auto; min-height: 0; position: relative; }
   position: absolute; top: 1px; right: 3px; font-size: 10px; color: #b45309;
   background: #fff7e6; border-radius: 4px; padding: 0 3px; line-height: 14px;
 }
+/* 自定义出诊时间的标记放左上角，避开右上角「缺资料」的感叹号 */
+.gc-cell .badge-time {
+  right: auto; left: 3px; color: #1d4ed8; background: #e8efff; font-weight: 600;
+}
+/* 格子自己单独设过时间的，用更实的底色区分 */
+.gc-cell .badge-time-cell { color: #fff; background: #2563eb; }
 
 .ctx-menu {
   position: fixed; z-index: 80; background: #fff; border: 1px solid var(--line-strong);
@@ -280,6 +286,27 @@ table.mini tr:last-child td { border-bottom: 0; }
   padding: 8px; display: grid; grid-template-columns: repeat(5, auto); gap: 6px;
 }
 .save-hint { font-size: 12.5px; color: var(--text-dim); margin-right: 4px; }
+
+/* ---------------- 出诊时间规律弹窗 ---------------- */
+.preset-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0 6px; }
+.rule-card {
+  border: 1px solid var(--line-strong); border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 10px; background: #f8fafd;
+}
+.rule-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.rule-no { font-weight: 700; font-size: 13px; color: #374151; }
+.day-toggles { display: inline-flex; gap: 4px; }
+.day-btn {
+  width: 28px; height: 28px; border-radius: 6px; cursor: pointer; padding: 0;
+  border: 1px solid var(--line-strong); background: #fff; font-size: 12.5px; color: var(--text-dim);
+}
+.day-btn:hover { border-color: #b9c3d6; }
+.day-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 700; }
+.rule-time-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.rule-shift { width: 34px; font-size: 13px; font-weight: 600; color: #4b5563; }
+.time-input { width: 104px; }
+.rule-hint { font-size: 12px; color: var(--text-dim); }
+.time-cell .btn { white-space: nowrap; }
 
 /* ---------------- 导出弹窗的保存位置 ---------------- */
 .dest-block {

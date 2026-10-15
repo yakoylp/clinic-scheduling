@@ -126,6 +126,7 @@
               <th style="width:120px">门诊编号</th>
               <th style="width:150px">号别名称</th>
               <th style="width:158px">默认诊室</th>
+              <th style="width:190px">出诊时间</th>
               <th>备注</th>
               <th style="width:70px">操作</th>
             </tr>
@@ -141,11 +142,11 @@
       <div class="page-head">
         <div>
           <h2>诊室设置</h2>
-          <p class="sub">排班表的列就是这里的诊室，顺序可以上下调整。诊室名称会写进导出表的「诊室名称」列。</p>
+          <p class="sub">排班表的列就是这里的诊室，顺序可以上下调整。诊室名称会写进导出表的「诊室名称」列。改动自动保存。</p>
         </div>
         <div class="page-head-actions">
+          <span class="save-hint" id="roomSaveHint"></span>
           <button class="btn btn-ghost" id="btnAddRoom">+ 新增诊室</button>
-          <button class="btn btn-primary" id="btnSaveRooms">保存诊室设置</button>
         </div>
       </div>
       <div class="card">
@@ -170,10 +171,10 @@
       <div class="page-head">
         <div>
           <h2>科室设置</h2>
-          <p class="sub">这些值会填进导出表里对应的列。</p>
+          <p class="sub">这些值会填进导出表里对应的列。改动自动保存。</p>
         </div>
         <div class="page-head-actions">
-          <button class="btn btn-primary" id="btnSaveSettings">保存设置</button>
+          <span class="save-hint" id="settingsSaveHint"></span>
         </div>
       </div>
 
@@ -260,6 +261,40 @@
     </div>
   </div>
 
+  <!-- ================= 弹窗：出诊时间规律 ================= -->
+  <div class="modal" id="modalRules" hidden>
+    <div class="modal-box modal-wide">
+      <div class="modal-head">
+        <h3 id="rulesTitle">出诊时间规律</h3>
+        <button class="btn btn-icon" id="btnRulesClose">×</button>
+      </div>
+      <div class="modal-body" id="rulesBody"></div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" id="btnRulesClear">清空全部规则</button>
+        <span style="flex:1"></span>
+        <button class="btn btn-ghost" id="btnRulesCancel">取消</button>
+        <button class="btn btn-primary" id="btnRulesSave">保存规律</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 弹窗：单格出诊时间 ================= -->
+  <div class="modal" id="modalCellTime" hidden>
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3 id="cellTimeTitle">这一格的出诊时间</h3>
+        <button class="btn btn-icon" id="btnCellTimeClose">×</button>
+      </div>
+      <div class="modal-body" id="cellTimeBody"></div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" id="btnCellTimeClear">清除这一格的时间设置</button>
+        <span style="flex:1"></span>
+        <button class="btn btn-ghost" id="btnCellTimeCancel">取消</button>
+        <button class="btn btn-primary" id="btnCellTimeSave">保存</button>
+      </div>
+    </div>
+  </div>
+
   <datalist id="titleOptions">
     <option value="医师"></option>
     <option value="主治医师"></option>
@@ -275,6 +310,7 @@
   <script src="js/state.js"></script>
   <script src="js/schedule.js"></script>
   <script src="js/doctors.js"></script>
+  <script src="js/timerules.js"></script>
   <script src="js/settings.js"></script>
   <script src="js/modals.js"></script>
   <script src="js/app.js"></script>

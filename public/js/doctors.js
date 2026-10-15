@@ -65,6 +65,18 @@ const DoctorsView = {
       roomSelect.value = doc.room || '';
       tr.appendChild(el('td', null, [roomSelect]));
 
+      // 出诊时间：默认跟班次走，个别医生可以按星期几另外配
+      const rules = Array.isArray(doc.timeRules) ? doc.timeRules : [];
+      const timeCell = el('td', { class: 'time-cell' });
+      const timeBtn = el('button', {
+        class: `btn btn-sm ${rules.length ? 'btn-primary' : 'btn-ghost'}`,
+        text: rules.length ? `已配 ${rules.length} 条规律` : '按班次默认',
+        title: rules.length ? summarizeRules(rules) : '默认跟「科室设置」里的班次时间',
+      });
+      timeBtn.onclick = () => TimeRules.open(doc);
+      timeCell.appendChild(timeBtn);
+      tr.appendChild(timeCell);
+
       tr.appendChild(
         el('td', null, [el('input', { class: 'input', value: doc.note || '', dataset: { field: 'note' }, placeholder: '备注（可选）' })])
       );

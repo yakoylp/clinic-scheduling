@@ -58,6 +58,8 @@ const fakeApi = {
         shifts: scheduleData.shifts,
         slots: month.slots,
         shiftTimes: month.shiftTimes,
+        slotRules: month.slotRules || {},
+        slotTimes: store.resolveMonthShiftTimes(roster.doctors, scheduleData, month),
         stats: store.computeStats(roster.doctors, month, scheduleData.rooms),
         days: store.monthDays(ym, month.startDate, month.endDate),
       });
@@ -66,6 +68,21 @@ const fakeApi = {
       const { month } = store.reconcileMonth(scheduleData, ym);
       for (const ch of changes) month.slots[`${ch.date}|${ch.shift}|${ch.roomId}`] = ch.doctorId || null;
       return ok({ applied: changes.length, rejected: [] });
+    },
+    setSlotTime: (ym, date, shift, roomId, times) => {
+      const { month } = store.reconcileMonth(scheduleData, ym);
+      if (!month.slotRules) month.slotRules = {};
+      const key = `${date}|${shift}|${roomId}`;
+      const start = (times && times.start) || '';
+      const end = (times && times.end) || '';
+      if (start || end) month.slotRules[key] = { start, end };
+      else delete month.slotRules[key];
+      return ok({ key });
+    },
+    clearSlotTime: (ym, date, shift, roomId) => {
+      const { month } = store.reconcileMonth(scheduleData, ym);
+      if (month.slotRules) delete month.slotRules[`${date}|${shift}|${roomId}`];
+      return ok({ key: `${date}|${shift}|${roomId}` });
     },
     create: () => ok({ created: true }),
     clear: () => ok({ cleared: 0 }),
@@ -102,7 +119,7 @@ window.HTMLElement.prototype.scrollIntoView = () => {};
  * 而 jsdom 的 window.eval 每次都是独立作用域，直接 eval 会报 $ is not defined。
  * 把 7 个脚本拼进同一个函数体再整体跑一遍，就还原了浏览器的行为。
  */
-const scripts = ['util.js', 'state.js', 'schedule.js', 'doctors.js', 'settings.js', 'modals.js', 'app.js'];
+const scripts = ['util.js', 'state.js', 'schedule.js', 'doctors.js', 'timerules.js', 'settings.js', 'modals.js', 'app.js'];
 const sources = scripts.map((name) => fs.readFileSync(path.join(ROOT, 'public', 'js', name), 'utf8'));
 const epilogue = `
 window.__app = { App, ScheduleView, DoctorsView, RoomsView, SettingsView, Help, Modals,
@@ -215,7 +232,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const rect = { clientX: 100, clientY: 100 };
   window.__app.ScheduleView.showContextMenu(rect.clientX, rect.clientY, window.__app.ScheduleView.cellInfo(target), target);
   checkTrue('菜单弹出了', !!$('#ctxMenu'));
-  checkTrue('菜单里有清空整行/整列', $('#ctxMenu').textContent.includes('整行') && $('#ctxMenu').textContent.includes('整列'));
+  const menuText = $('#ctxMenu').textContent;
+  checkTrue('有清空整列', menuText.includes('整列'));
+  checkTrue('去掉了没用的「整行」两项', !menuText.includes('整行'), menuText);
+  checkTrue('有自定义这一格的时间', menuText.includes('自定义这一格的时间'));
+  checkTrue('没设过时间时不显示清除项', !menuText.includes('清除这一格的时间设置'));
   if ($('#ctxMenu')) $('#ctxMenu').remove();
 
   console.log('== 说明弹窗 ==');

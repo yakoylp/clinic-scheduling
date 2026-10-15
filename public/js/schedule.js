@@ -105,16 +105,30 @@ const ScheduleView = {
       dataset: { date: day.date, shift: shift.name, room: room.id },
       title: `${day.date}（${day.weekdayName}）${shift.name} · ${room.name}`,
     });
-    this.fillCell(cell, doc, day);
+    this.fillCell(cell, doc, day, { date: day.date, shift: shift.name, roomId: room.id });
     return cell;
   },
 
-  fillCell(cell, doc, day) {
+  fillCell(cell, doc, day, info) {
     clear(cell);
     cell.classList.toggle('empty', !doc);
     if (doc) {
       cell.style.background = tint(doc.color, day.isWeekend ? 0.26 : 0.14);
       cell.appendChild(el('span', { class: 'cell-name', text: doc.name, style: `color:${doc.color}` }));
+      // 这一格如果按自己的设置或医生的周规律出诊，左上角标出开始时间
+      const slot = info || this.cellInfo(cell);
+      const times = slot ? App.slotTime(App.slotKey(slot.date, slot.shift, slot.roomId)) : null;
+      if (times && times.customized) {
+        const onlyCell = times.source === 'cell';
+        const who = onlyCell ? '这一格单独设了时间' : `这位医生这天的${slot.shift}按自己的规律出诊`;
+        cell.appendChild(
+          el('span', {
+            class: `badge badge-time${onlyCell ? ' badge-time-cell' : ''}`,
+            text: times.start.slice(0, 5),
+            title: `${who}：${times.start.slice(0, 5)}–${times.end.slice(0, 5)}`,
+          })
+        );
+      }
       const problems = [];
       if (!doc.code) problems.push('缺编号');
       if (!doc.title) problems.push('缺号别');
@@ -183,7 +197,7 @@ const ScheduleView = {
       const info = this.cellInfo(cell);
       if (!info) continue;
       const docId = App.slot(info.date, info.shift, info.roomId);
-      this.fillCell(cell, docId ? App.doctor(docId) : null, describeDate(info.date));
+      this.fillCell(cell, docId ? App.doctor(docId) : null, describeDate(info.date), info);
     }
   },
 
@@ -195,7 +209,7 @@ const ScheduleView = {
     if (drag && drag.touched.has(key)) return;
     if (drag) drag.touched.add(key);
     App.applyChanges([{ date: info.date, shift: info.shift, roomId: info.roomId, doctorId }]);
-    this.fillCell(cell, doctorId ? App.doctor(doctorId) : null, describeDate(info.date));
+    this.fillCell(cell, doctorId ? App.doctor(doctorId) : null, describeDate(info.date), info);
     this.updateHeaderAndSide();
   },
 
@@ -254,8 +268,21 @@ const ScheduleView = {
       this.fillCell(cell, null, day);
       this.updateHeaderAndSide();
     }, !doc);
-    add(`清空 ${day.day}日 ${info.shift} 整行`, () => this.clearScope({ date: info.date, shift: info.shift }));
     add(`清空「${room ? room.short || room.name : ''}」整列`, () => this.clearScope({ roomId: info.roomId }));
+
+    // 单格出诊时间：优先级高于医生规律和班次默认
+    const slotKey = App.slotKey(info.date, info.shift, info.roomId);
+    const cellRule = (App.slotRules() || {})[slotKey];
+    add(cellRule ? `改这一格的时间（现在 ${cellRule.start.slice(0, 5)}–${cellRule.end.slice(0, 5)}）` : '自定义这一格的时间…', () => {
+      CellTimeRule.open(info);
+    });
+    if (cellRule) {
+      add('清除这一格的时间设置', () => {
+        CellTimeRule.info = info;
+        CellTimeRule.clear();
+      });
+    }
+
     if (App.brushId) {
       const brush = App.doctor(App.brushId);
       add(`换成 ${brush ? brush.name : ''}`, () => {
@@ -269,16 +296,6 @@ const ScheduleView = {
         App.brushId = doc.id;
         App.setMode('paint');
         App.emit({ type: 'brush' });
-      });
-      add(`把 ${day.day}日 ${info.shift} 整行都排 ${doc.name}`, () => {
-        const changes = App.rooms.map((r) => ({
-          date: info.date,
-          shift: info.shift,
-          roomId: r.id,
-          doctorId: doc.id,
-        }));
-        App.applyChanges(changes);
-        this.render();
       });
     }
     menu.style.left = `${Math.min(x, window.innerWidth - 250)}px`;

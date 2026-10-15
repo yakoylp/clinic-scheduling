@@ -1,34 +1,44 @@
 'use strict';
 /**
  * Electron 主进程：单窗口应用，本地离线，不联网。
+ *
+ * 注意：下面这段「定用户数据目录」的代码必须放在最前面，且只依赖 electron / path / fs。
+ * app.setPath('userData') 越早调用越可靠——便携版（Portable exe）尤其挑时机：
+ * 放在 ready 之后再调，Electron 已经按 package.json 的 name 建过一次目录了，
+ * 数据就会落到 %APPDATA%/<package name> 去，跟着 exe 名字走、换个版本就找不着。
  */
-const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
+const { app } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const api = require('./api');
 
-/**
- * 用户数据目录名跟着应用名走。
- * 光 setName 不够：userData 路径在进程启动时就按 package.json 的 name 定好了，
- * 必须同时 setPath，否则打包版还是会写到 %APPDATA%/derm-scheduling。
- */
 const APP_NAME = '门诊排班';
-const LEGACY_APP_NAME = 'derm-scheduling';
-try {
-  const appData = app.getPath('appData');
-  const target = path.join(appData, APP_NAME);
-  // 从旧名字升上来的用户，把数据搬过来，别丢排班
-  const legacy = path.join(appData, LEGACY_APP_NAME, 'data');
-  const targetData = path.join(target, 'data');
-  if (!fs.existsSync(targetData) && fs.existsSync(legacy)) {
-    fs.mkdirSync(path.dirname(targetData), { recursive: true });
-    fs.cpSync(legacy, targetData, { recursive: true });
+/** 历史上用过的目录名，从新到旧；升上来时按顺序找第一个有数据的搬过来 */
+const LEGACY_APP_NAMES = ['clinic-scheduling', 'derm-scheduling'];
+
+(function pinUserDataDir() {
+  try {
+    const appData = app.getPath('appData');
+    const target = path.join(appData, APP_NAME);
+    const targetData = path.join(target, 'data');
+    for (const legacyName of LEGACY_APP_NAMES) {
+      const legacy = path.join(appData, legacyName, 'data');
+      if (!fs.existsSync(targetData) && fs.existsSync(legacy)) {
+        fs.mkdirSync(path.dirname(targetData), { recursive: true });
+        fs.cpSync(legacy, targetData, { recursive: true });
+        console.log(`[paths] 已把数据从 ${legacyName} 迁移到 ${APP_NAME}`);
+      }
+    }
+    app.setName(APP_NAME);
+    app.setPath('userData', target);
+    console.log(`[paths] 用户数据目录 = ${target}`);
+  } catch (err) {
+    // 取不到路径也不该让软件起不来，退回 Electron 默认值
+    console.log(`[paths] 设定用户数据目录失败，改用默认值：${err.message}`);
   }
-  app.setName(APP_NAME);
-  app.setPath('userData', target);
-} catch (err) {
-  // 取不到路径也不该让软件起不来，退回 Electron 默认值
-}
+})();
+
+const { BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
+const api = require('./api');
 
 const INDEX = path.join(__dirname, '..', 'public', 'index.html');
 const ICON = path.join(__dirname, '..', 'public', 'assets', 'icon.png');

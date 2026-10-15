@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('api', {
   month: {
     get: (ym) => invoke('month:get', ym),
     patch: (ym, changes) => invoke('month:patch', ym, changes),
+    setSlotTime: (ym, date, shift, roomId, times) => invoke('month:setSlotTime', ym, date, shift, roomId, times),
+    clearSlotTime: (ym, date, shift, roomId) => invoke('month:clearSlotTime', ym, date, shift, roomId),
     create: (ym) => invoke('month:create', ym),
     clear: (ym, scope) => invoke('month:clear', ym, scope),
     remove: (ym) => invoke('month:delete', ym),
