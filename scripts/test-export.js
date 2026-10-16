@@ -7,6 +7,7 @@
  *
  * 用法：node scripts/test-export.js [样例工作簿路径] [导出目录]
  */
+require('./test-env');
 const path = require('path');
 const fs = require('fs');
 const store = require('../lib/store');
@@ -15,7 +16,8 @@ const exporter = require('../lib/export');
 const sample = require('../lib/legacy-sample');
 
 const ROOT = path.join(__dirname, '..');
-const OUT_DIR = process.argv[3] || path.join(ROOT, '导出');
+// 导出目录默认走 test-env 指定的临时目录，别往工程的 导出/ 里写
+const OUT_DIR = process.argv[3] || require('./test-env').outDir;
 
 let failures = 0;
 function check(label, actual, expected) {
@@ -110,7 +112,10 @@ console.log('  sheet：', back.SheetNames);
 const backWs = back.Sheets[back.SheetNames[0]];
 const aoa = XLSX.utils.sheet_to_json(backWs, { header: 1, raw: false, defval: '' });
 console.log('  表头：', JSON.stringify(aoa[0]));
-check('表头列数', aoa[0].length, 10);
+check('表头列数', aoa[0].length, 12);
+check('表头前 10 列不变', aoa[0].slice(0, 10).join('|'), '号源日期|班次|班次开始时间|班次结束时间|机构名称|坐诊科室名称|坐诊医生编码|号别名称|诊室名称|分诊台名称');
+check('新增第 11 列', aoa[0][10], '每个时间间隔号数');
+check('新增第 12 列', aoa[0][11], '时间间隔（分钟）');
 check('数据行数', aoa.length - 1, result.rowCount);
 console.log('  第 2 行：', JSON.stringify(aoa[1]));
 checkTrue('日期是文本而非序列号', /^\d{4}-\d{2}-\d{2}$/.test(aoa[1][0]), aoa[1][0]);
@@ -118,6 +123,17 @@ check('开始时间是文本', aoa[1][2], `${aoa[1][0]} 08:00:00`);
 checkTrue('日期全部是 YYYY-MM-DD 文本', aoa.slice(1).every((r) => /^\d{4}-\d{2}-\d{2}$/.test(r[0])));
 checkTrue('诊室名都在诊室设置里', aoa.slice(1).every((r) => schedule.rooms.some((x) => x.name === r[8])));
 checkTrue('导出的格子数 = 已排数', aoa.length - 1 === fixture.assignmentCount);
+// 两个新列：默认值 1 / 8，且必须是文本
+checkTrue(
+  '每行都写了「每个时间间隔号数」',
+  aoa.slice(1).every((r) => r[10] === String(store.DEFAULT_PER_INTERVAL)),
+  aoa[1] && aoa[1][10]
+);
+checkTrue(
+  '每行都写了「时间间隔（分钟）」',
+  aoa.slice(1).every((r) => r[11] === String(store.DEFAULT_INTERVAL_MINUTES)),
+  aoa[1] && aoa[1][11]
+);
 
 console.log('== 7. 样式保真（和模板逐格对比） ==');
 const { spawnSync } = require('child_process');

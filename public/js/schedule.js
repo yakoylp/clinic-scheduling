@@ -115,19 +115,34 @@ const ScheduleView = {
     if (doc) {
       cell.style.background = tint(doc.color, day.isWeekend ? 0.26 : 0.14);
       cell.appendChild(el('span', { class: 'cell-name', text: doc.name, style: `color:${doc.color}` }));
-      // 这一格如果按自己的设置或医生的周规律出诊，左上角标出开始时间
+      // 这一格的时间/间隔如果和班次默认不一样，左上角标出来（一样就不标，免得全是噪音）
       const slot = info || this.cellInfo(cell);
       const times = slot ? App.slotTime(App.slotKey(slot.date, slot.shift, slot.roomId)) : null;
-      if (times && times.customized) {
-        const onlyCell = times.source === 'cell';
-        const who = onlyCell ? '这一格单独设了时间' : `这位医生这天的${slot.shift}按自己的规律出诊`;
-        cell.appendChild(
-          el('span', {
-            class: `badge badge-time${onlyCell ? ' badge-time-cell' : ''}`,
-            text: times.start.slice(0, 5),
-            title: `${who}：${times.start.slice(0, 5)}–${times.end.slice(0, 5)}`,
-          })
-        );
+      if (times) {
+        const conf = (App.shifts || []).find((s) => s.name === slot.shift) || {};
+        const startChanged = times.start !== (conf.start || '');
+        const endChanged = times.end !== (conf.end || '');
+        const perChanged = String(times.perInterval) !== String(conf.perInterval);
+        const intervalChanged = String(times.interval) !== String(conf.interval);
+        const differs = startChanged || endChanged || perChanged || intervalChanged;
+        if (differs) {
+          // 优先显示开始时间；只改了间隔/号数就显示那一项
+          let text = times.start.slice(0, 5);
+          if (!startChanged) {
+            text = intervalChanged ? `${times.interval}分` : `${times.perInterval}号`;
+          }
+          const onlyCell = times.source === 'cell';
+          const who = onlyCell ? '这一格单独设了' : `这位医生这天的${slot.shift}按自己的规律走`;
+          cell.appendChild(
+            el('span', {
+              class: `badge badge-time${onlyCell ? ' badge-time-cell' : ''}`,
+              text,
+              title:
+                `${who}：${times.start.slice(0, 5)}–${times.end.slice(0, 5)}，${times.perInterval} 号/${times.interval} 分钟`
+                + (perChanged || intervalChanged ? '（和班次默认不同）' : ''),
+            })
+          );
+        }
       }
       const problems = [];
       if (!doc.code) problems.push('缺编号');

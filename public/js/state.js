@@ -7,6 +7,10 @@
 /** 单次最多记多少步撤销 */
 const UNDO_LIMIT = 200;
 
+/** 「每个时间间隔号数 / 时间间隔（分钟）」在界面侧的兜底默认（与 lib/store.js 保持一致） */
+const DEFAULT_PER_INTERVAL_FALLBACK = 1;
+const DEFAULT_INTERVAL_FALLBACK = 8;
+
 const App = {
   ready: false,
   snapshot: null,
@@ -79,12 +83,12 @@ const App = {
   },
 
   /**
-   * 某个格子实际用的起止时间。
+   * 某个格子实际用的各项参数。
    * 现场按「当前排班 + 格子级设置 + 医生级周规律」算，而不是读主进程给的快照——
-   * 用户刚改完格子或规律，快照就已经过时了，时间标记会画错。
-   * 优先级与 lib/store.js 的 resolveCellShiftTime 保持一致。
+   * 用户刚改完格子或规律，快照就已经过时了，标记会画错。
+   * 优先级和「按字段回退」的逻辑与 lib/store.js 的 resolveCellShiftTime 完全一致。
    * @param key '日期|班次|诊室id'
-   * @returns {{ start, end, customized, source }}
+   * @returns {{ start, end, perInterval, interval, customized, source }}
    */
   slotTime(key) {
     if (typeof key !== 'string' || !key.includes('|')) return null;
@@ -93,47 +97,73 @@ const App = {
     return this.shiftTimeFor(date, shift, roomId);
   },
 
-  /** 格子级时间设置：'日期|班次|诊室id' -> { start, end } */
+  /** 格子级设置：'日期|班次|诊室id' -> { start, end, perInterval, interval } */
   slotRules() {
     return (this.month && this.month.slotRules) || {};
   },
 
-  /** 某位医生在某天某班次的实际上班时间（和 lib/store.js 的 effectiveShiftTime 同一套规则） */
+  /** 某位医生在某天某班次的实际参数（和 lib/store.js 的 resolveCellShiftTime 同一套规则） */
   shiftTimeFor(date, shiftName, roomId) {
     const conf = (this.snapshot.shifts || []).find((s) => s.name === shiftName) || {};
-    const base = { start: conf.start || '', end: conf.end || '' };
     const key = this.slotKey(date, shiftName, roomId);
-
-    // 1) 格子自己的设置优先
-    const cellRule = this.slotRules()[key];
-    if (cellRule && (cellRule.start || cellRule.end)) {
-      return {
-        start: cellRule.start || base.start,
-        end: cellRule.end || base.end,
-        customized: true,
-        source: 'cell',
-      };
-    }
-
-    // 2) 医生级周规律
     const docId = this.slot(date, shiftName, roomId);
     const doc = docId ? this.doctor(docId) : null;
     const [y, m, d] = String(date).split('-').map(Number);
     const wd = new Date(y, m - 1, d).getDay();
+
+    // 医生级周规律：命中就用，没命中的字段继续往下层问
+    let doctorHit = null;
     for (const rule of (doc && doc.timeRules) || []) {
       if (!Array.isArray(rule.days) || !rule.days.includes(wd)) continue;
       const hit = rule.shifts && rule.shifts[shiftName];
       if (!hit) continue;
-      return {
-        start: hit.start || base.start,
-        end: hit.end || base.end,
-        customized: true,
-        source: 'doctor',
-      };
+      doctorHit = hit;
+      break;
     }
 
-    // 3) 班次默认
-    return Object.assign(base, { customized: false, source: 'shift' });
+    const layers = [
+      { source: 'cell', values: this.slotRules()[key] || null },
+      { source: 'doctor', values: doctorHit },
+      {
+        source: 'shift',
+        values: {
+          start: conf.start || '',
+          end: conf.end || '',
+          perInterval: conf.perInterval === undefined || conf.perInterval === null || conf.perInterval === ''
+            ? DEFAULT_PER_INTERVAL_FALLBACK
+            : conf.perInterval,
+          interval: conf.interval === undefined || conf.interval === null || conf.interval === ''
+            ? DEFAULT_INTERVAL_FALLBACK
+            : conf.interval,
+        },
+      },
+    ];
+
+    const fields = {};
+    const sources = [];
+    for (const field of ['start', 'end', 'perInterval', 'interval']) {
+      let value = '';
+      let from = 'shift';
+      for (const layer of layers) {
+        if (!layer.values) continue;
+        const raw = layer.values[field];
+        if (raw === undefined || raw === null || String(raw).trim() === '') continue;
+        value = raw;
+        from = layer.source;
+        break;
+      }
+      fields[field] = value;
+      sources.push(from);
+    }
+    const source = sources.includes('cell') ? 'cell' : sources.includes('doctor') ? 'doctor' : 'shift';
+    return {
+      start: fields.start,
+      end: fields.end,
+      perInterval: fields.perInterval,
+      interval: fields.interval,
+      customized: source !== 'shift',
+      source,
+    };
   },
 
   /** 整月所有格子的实际时间，按 '日期|班次|诊室id' 索引 */

@@ -9,6 +9,7 @@
  * 用法：node scripts/test-ux.js
  */
 const fs = require('fs');
+require('./test-env');
 const path = require('path');
 const { JSDOM } = require('jsdom');
 const store = require('../lib/store');
@@ -32,7 +33,7 @@ const ok = (data) => Promise.resolve({ ok: true, data });
 
 function makeApi(snapshot, hooks) {
   const hook = hooks || {};
-  const schedule = store.loadSchedule();
+  const schedule = smokeData().schedule;
   // 假数据源的「已存格子」和「格子级时间设置」，patch/setSlotTime 写这里，month.get 从这里读
   const liveSlots = new Map();
   // test-ux 用的是自己造的 snapshot，没有 scheduleData；这里统一成一份可写的月数据
@@ -122,13 +123,13 @@ function makeApi(snapshot, hooks) {
       },
       setSlotTime: (requestedYm, date, shift, roomId, times) => {
         const key = `${date}|${shift}|${roomId}`;
-        const start = (times && times.start) || '';
-        const end = (times && times.end) || '';
+        // 和真实 handlers.setSlotTime 一样：四个字段各自可选，全空等于没设置
+        const rule = store.normalizeSlotRule(times || {});
         if (!liveMonths[requestedYm]) liveMonths[requestedYm] = { slotRules: {} };
         if (!liveMonths[requestedYm].slotRules) liveMonths[requestedYm].slotRules = {};
-        if (start || end) liveMonths[requestedYm].slotRules[key] = { start, end };
+        if (rule) liveMonths[requestedYm].slotRules[key] = rule;
         else delete liveMonths[requestedYm].slotRules[key];
-        return ok({ key, rule: start || end ? { start, end } : null });
+        return ok({ key, rule });
       },
       clearSlotTime: (requestedYm, date, shift, roomId) => {
         if (liveMonths[requestedYm] && liveMonths[requestedYm].slotRules) {
@@ -199,12 +200,27 @@ window.__app = { App, ScheduleView, DoctorsView, RoomsView, SettingsView, Help, 
   return window;
 }
 
+/** 虚构样例数据：直接读 data-smoke/，不读磁盘 data/（测试要自洽，也不能碰真实数据） */
+const SMOKE_DIR = path.join(__dirname, '..', 'data-smoke');
+function smokeData() {
+  const doctorsFile = path.join(SMOKE_DIR, 'doctors.json');
+  const scheduleFile = path.join(SMOKE_DIR, 'schedule.json');
+  if (!fs.existsSync(doctorsFile) || !fs.existsSync(scheduleFile)) {
+    console.error('缺少测试数据，先跑：node scripts/make-smoke-data.js');
+    process.exit(2);
+  }
+  // 每次都深拷一份：各测试段落会改自己那份数据，串了就会互相污染
+  return {
+    doctors: JSON.parse(fs.readFileSync(doctorsFile, 'utf8')).doctors,
+    schedule: JSON.parse(fs.readFileSync(scheduleFile, 'utf8')),
+  };
+}
+
 function snapshotFromData(overrides) {
-  const schedule = store.loadSchedule();
-  const roster = store.loadDoctors();
+  const { doctors, schedule } = smokeData();
   const months = Object.keys(schedule.months).sort();
   const base = {
-    doctors: roster.doctors,
+    doctors,
     settings: schedule.settings,
     rooms: schedule.rooms,
     shifts: schedule.shifts,
@@ -340,12 +356,12 @@ function snapshotFromData(overrides) {
 
   console.log('== 医生级出诊时间规律 ==');
   {
-    // 造一位周一到周五 08:30、周六日 08:00 的医生，看格子标记和编辑弹窗
+    // 周一到周五 08:30（和默认不同），周六日 09:00（也和默认不同）
     const snapshot = snapshotFromData({});
     const doctor = snapshot.doctors[0];
     doctor.timeRules = [
       { days: [1, 2, 3, 4, 5], shifts: { 上午: { start: '08:30:00' } } },
-      { days: [0, 6], shifts: { 上午: { start: '08:00:00' } } },
+      { days: [0, 6], shifts: { 上午: { start: '09:00:00' } } },
     ];
     const w = await boot(snapshot);
     const doc = w.document;
@@ -368,13 +384,13 @@ function snapshotFromData(overrides) {
     const satBadge = cellOf(saturday.date).querySelector('.badge-time');
     checkTrue('周一格子有时间标记', !!monBadge, monBadge ? monBadge.textContent : '(无)');
     check('周一标记显示 08:30', monBadge && monBadge.textContent, '08:30');
-    check('周六标记显示 08:00', satBadge && satBadge.textContent, '08:00');
+    check('周六标记显示 09:00', satBadge && satBadge.textContent, '09:00');
     checkTrue('标记提示里有起止时间', /08:30[–-]12:00/.test(monBadge.getAttribute('title')), monBadge.getAttribute('title'));
 
     const monKey = `${monday.date}|${morning.name}|${room.id}`;
     const satKey = `${saturday.date}|${morning.name}|${room.id}`;
     check('周一格子实际开始时间', App.slotTime(monKey).start, '08:30:00');
-    check('周六格子实际开始时间', App.slotTime(satKey).start, '08:00:00');
+    check('周六格子实际开始时间', App.slotTime(satKey).start, '09:00:00');
     check('周一格子被标记为自定义', App.slotTime(monKey).customized, true);
 
     w.__app.switchTab('doctors');
@@ -480,6 +496,80 @@ function snapshotFromData(overrides) {
     await new Promise((r) => setTimeout(r, 300));
     check('清除后回到默认', App.slotTime(key).start, '08:00:00');
     check('清除后来源是 shift', App.slotTime(key).source, 'shift');
+  }
+
+  console.log('== 格子级号数 / 间隔 + 徽标只在真不一样时才显示 ==');
+  {
+    const snapshot = snapshotFromData({});
+    const doctor = snapshot.doctors[0];
+    const w = await boot(snapshot);
+    const doc = w.document;
+    const App = w.__app.App;
+    const day = App.days[0];
+    const morning = App.shifts[0];
+    const room = App.rooms[0];
+    const key = App.slotKey(day.date, morning.name, room.id);
+    const cellOf = () =>
+      doc.querySelector(`.gc-cell[data-date="${day.date}"][data-shift="${morning.name}"][data-room="${room.id}"]`);
+
+    w.__app.ScheduleView.paintCell(cellOf(), doctor.id);
+    await App.saveNow(true);
+    w.__app.ScheduleView.render();
+
+    // 默认情况下不该有徽标（时间、号数、间隔都和班次默认一样）
+    check('默认格子没有时间徽标', cellOf().querySelector('.badge-time'), null);
+    check('默认号数', String(App.slotTime(key).perInterval), String(App.shifts[0].perInterval));
+    check('默认间隔', String(App.slotTime(key).interval), String(App.shifts[0].interval));
+
+    // 只改间隔：徽标要显示「N分」，且是格子级的实心底
+    w.__app.CellTimeRule.open({ date: day.date, shift: morning.name, roomId: room.id });
+    const numInputs = doc.querySelectorAll('#cellTimeBody .num-input');
+    check('单格弹窗有两个数字输入框', numInputs.length, 2);
+    numInputs[1].value = '5';
+    numInputs[1].dispatchEvent(new w.Event('input', { bubbles: true }));
+    await w.__app.CellTimeRule.save();
+    await new Promise((r) => setTimeout(r, 300));
+    w.__app.ScheduleView.render();
+
+    check('间隔存进格子设置', String(App.slotRules()[key].interval), '5');
+    check('只改间隔时开始时间不变', App.slotTime(key).start, App.shifts[0].start);
+    check('实际间隔是 5', String(App.slotTime(key).interval), '5');
+    const badge = cellOf().querySelector('.badge-time-cell');
+    checkTrue('间隔不同 → 有实心徽标', !!badge, badge ? badge.textContent : '(无)');
+    check('徽标显示间隔', badge && badge.textContent, '5分');
+    checkTrue('悬停提示里有号数和间隔', /1 号\/5 分钟/.test(badge.getAttribute('title')), badge.getAttribute('title'));
+
+    // 号数一起改：开始时间没变，仍显示间隔
+    w.__app.CellTimeRule.open({ date: day.date, shift: morning.name, roomId: room.id });
+    const nums = doc.querySelectorAll('#cellTimeBody .num-input');
+    nums[0].value = '2';
+    nums[0].dispatchEvent(new w.Event('input', { bubbles: true }));
+    await w.__app.CellTimeRule.save();
+    await new Promise((r) => setTimeout(r, 300));
+    w.__app.ScheduleView.render();
+    check('号数也存进格子设置', String(App.slotRules()[key].perInterval), '2');
+    check('只改号数时徽标仍显示间隔', cellOf().querySelector('.badge-time-cell').textContent, '5分');
+
+    // 把号数和间隔都改回默认值（时间本来就没改）→ 徽标应当消失
+    w.__app.CellTimeRule.open({ date: day.date, shift: morning.name, roomId: room.id });
+    const nums2 = doc.querySelectorAll('#cellTimeBody .num-input');
+    nums2[0].value = String(App.shifts[0].perInterval);
+    nums2[0].dispatchEvent(new w.Event('input', { bubbles: true }));
+    nums2[1].value = String(App.shifts[0].interval);
+    nums2[1].dispatchEvent(new w.Event('input', { bubbles: true }));
+    await w.__app.CellTimeRule.save();
+    await new Promise((r) => setTimeout(r, 300));
+    w.__app.ScheduleView.render();
+    check('和默认一样时不再显示徽标', cellOf().querySelector('.badge-time'), null);
+
+    // 科室设置里把默认间隔改成 12，这一格（仍是默认）应跟着变成 12
+    w.__app.switchTab('settings');
+    const intervalInput = doc.querySelector('#shiftTbody tr [data-field="interval"]');
+    checkTrue('科室设置里有「时间间隔（分钟）」输入框', !!intervalInput);
+    const perInput = doc.querySelector('#shiftTbody tr [data-field="perInterval"]');
+    checkTrue('科室设置里有「每个时间间隔号数」输入框', !!perInput);
+    check('科室设置显示的当前间隔', intervalInput.value, String(App.shifts[0].interval));
+    await new Promise((r) => setTimeout(r, 50));
   }
 
   console.log('== 诊室 / 科室设置：改动即自动保存并刷新 ==');

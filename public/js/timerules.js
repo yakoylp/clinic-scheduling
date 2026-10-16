@@ -20,19 +20,40 @@ function rulesToRows(rules) {
     const afternoon = (rule.shifts && rule.shifts['下午']) || {};
     return {
       days: Array.isArray(rule.days) ? rule.days.slice() : [],
-      morning: { start: hhmm(morning.start), end: hhmm(morning.end) },
-      afternoon: { start: hhmm(afternoon.start), end: hhmm(afternoon.end) },
+      morning: toFields(morning),
+      afternoon: toFields(afternoon),
     };
   });
 }
 
+/** 内部值 -> 输入框值（时间取 HH:MM，数字取字符串） */
+function toFields(t) {
+  return {
+    start: hhmm(t.start),
+    end: hhmm(t.end),
+    perInterval: numText(t.perInterval),
+    interval: numText(t.interval),
+  };
+}
+
+/** 数字 -> 输入框文本；null/undefined 表示「这一层没设」 */
+function numText(v) {
+  return v === null || v === undefined || v === '' ? '' : String(v);
+}
+
 /** 新行默认填上班次的当前时间，用户只改要变的那一格 */
 function blankRow(days) {
-  const row = { days: days.slice(), morning: { start: '', end: '' }, afternoon: { start: '', end: '' } };
+  const row = {
+    days: days.slice(),
+    morning: { start: '', end: '', perInterval: '', interval: '' },
+    afternoon: { start: '', end: '', perInterval: '', interval: '' },
+  };
   for (const [key, shiftName] of [['morning', '上午'], ['afternoon', '下午']]) {
     const conf = (App.shifts || []).find((s) => s.name === shiftName) || {};
     row[key].start = hhmm(conf.start);
     row[key].end = hhmm(conf.end);
+    row[key].perInterval = numText(conf.perInterval);
+    row[key].interval = numText(conf.interval);
   }
   return row;
 }
@@ -42,18 +63,33 @@ function hhmm(value) {
   return value ? String(value).slice(0, 5) : '';
 }
 
-/** 行 -> 内部规则（空的不写入） */
+/** 一个班次这一行里，有哪几项和班次默认不同（哪几项会被写进规则） */
+function changedFields(block, conf) {
+  const out = {};
+  if ((block.start || '') !== hhmm(conf.start)) out.start = block.start;
+  if ((block.end || '') !== hhmm(conf.end)) out.end = block.end;
+  if ((block.perInterval || '') !== numText(conf.perInterval)) out.perInterval = block.perInterval;
+  if ((block.interval || '') !== numText(conf.interval)) out.interval = block.interval;
+  return out;
+}
+
+/** 行 -> 内部规则（和班次默认一样的不写入，保证「没配规则」的医生不留空壳规则） */
 function rowsToRules(rows) {
   const out = [];
   for (const row of rows) {
     const days = [...new Set(row.days.map(Number))].filter((d) => d >= 0 && d <= 6).sort((a, b) => a - b);
     if (!days.length) continue;
     const shifts = {};
-    if (row.morning.start || row.morning.end) {
-      shifts['上午'] = { start: row.morning.start, end: row.morning.end };
-    }
-    if (row.afternoon.start || row.afternoon.end) {
-      shifts['下午'] = { start: row.afternoon.start, end: row.afternoon.end };
+    for (const [key, shiftName] of [['morning', '上午'], ['afternoon', '下午']]) {
+      const conf = (App.shifts || []).find((s) => s.name === shiftName) || {};
+      const diff = changedFields(row[key], conf);
+      if (!Object.keys(diff).length) continue;
+      shifts[shiftName] = {
+        start: diff.start ? (diff.start.length === 5 ? `${diff.start}:00` : diff.start) : '',
+        end: diff.end ? (diff.end.length === 5 ? `${diff.end}:00` : diff.end) : '',
+        perInterval: diff.perInterval || null,
+        interval: diff.interval || null,
+      };
     }
     if (!Object.keys(shifts).length) continue;
     out.push({ days, shifts });
@@ -68,9 +104,16 @@ function summarizeRules(rules) {
       const days = rule.days.slice().sort((a, b) => a - b).map((d) => DAY_LABELS[d]).join('');
       const parts = Object.entries(rule.shifts || {}).map(([name, t]) => {
         const range = [hhmm(t.start), hhmm(t.end)].filter(Boolean).join('–');
-        return `${name} ${range}`;
+        const extra = [];
+        if (t.perInterval !== null && t.perInterval !== undefined && t.perInterval !== '') {
+          extra.push(`${t.perInterval} 号/间隔`);
+        }
+        if (t.interval !== null && t.interval !== undefined && t.interval !== '') {
+          extra.push(`${t.interval} 分钟`);
+        }
+        return `${name} ${[range, extra.join('、')].filter(Boolean).join('，')}`;
       });
-      return `周${days}：${parts.join('，')}`;
+      return `周${days}：${parts.join('；')}`;
     })
     .join('\n');
 }
@@ -160,7 +203,7 @@ const TimeRules = {
     );
     card.appendChild(head);
 
-    // 上午 / 下午时间
+    // 上午 / 下午：第一行起止时间，第二行两个间隔参数
     for (const [shiftName, key] of [['上午', 'morning'], ['下午', 'afternoon']]) {
       const conf = (App.shifts || []).find((s) => s.name === shiftName) || {};
       const line = el('div', { class: 'rule-time-line' }, [
@@ -191,13 +234,51 @@ const TimeRules = {
           );
         }
       }
-      // 和班次默认完全一样时提示一下，避免用户以为没生效
-      const sameAsDefault =
-        hhmm(conf.start) === row[key].start && hhmm(conf.end) === row[key].end;
-      if (sameAsDefault) {
-        line.appendChild(el('span', { class: 'rule-hint', text: '与班次默认相同' }));
-      }
       card.appendChild(line);
+
+      // 第二行：每个时间间隔号数 / 时间间隔（分钟）
+      const line2 = el('div', { class: 'rule-time-line rule-time-line-2' }, [
+        el('span', { class: 'rule-shift', text: '' }),
+      ]);
+      for (const [field, label, unit] of [['perInterval', '号数', '个/间隔'], ['interval', '间隔', '分钟']]) {
+        line2.appendChild(el('span', { class: 'lbl', text: label }));
+        const input = el('input', {
+          class: 'input sm num-input',
+          type: 'number',
+          min: '0',
+          step: field === 'interval' ? '1' : '1',
+          value: row[key][field] || '',
+        });
+        input.oninput = () => {
+          row[key][field] = input.value;
+        };
+        line2.appendChild(input);
+        line2.appendChild(el('span', { class: 'rule-hint', text: unit }));
+        if (conf[field] !== undefined && conf[field] !== null && conf[field] !== '') {
+          line2.appendChild(
+            el('button', {
+              class: 'btn btn-sm btn-ghost',
+              text: `班次默认 ${conf[field]}`,
+              title: '点一下恢复成班次默认',
+              onclick: () => {
+                row[key][field] = numText(conf[field]);
+                this.render();
+              },
+            })
+          );
+        }
+      }
+      card.appendChild(line2);
+
+      // 一整块都和班次默认一样时提示一下，避免用户以为没生效
+      const sameAsDefault =
+        hhmm(conf.start) === (row[key].start || '') &&
+        hhmm(conf.end) === (row[key].end || '') &&
+        numText(conf.perInterval) === (row[key].perInterval || '') &&
+        numText(conf.interval) === (row[key].interval || '');
+      if (sameAsDefault) {
+        line2.appendChild(el('span', { class: 'rule-hint', text: '与班次默认相同' }));
+      }
     }
 
     return card;
@@ -206,11 +287,16 @@ const TimeRules = {
   async save() {
     const built = rowsToRules(this.rows);
     const emptyRows = this.rows.filter((r) => {
-      const hasTime = r.morning.start || r.morning.end || r.afternoon.start || r.afternoon.end;
-      return hasTime && !r.days.length;
+      const touched = ['morning', 'afternoon'].some((k) =>
+        ['start', 'end', 'perInterval', 'interval'].some((f) => {
+          const conf = (App.shifts || []).find((s) => s.name === (k === 'morning' ? '上午' : '下午')) || {};
+          return (r[k][f] || '') !== (f === 'start' || f === 'end' ? hhmm(conf[f]) : numText(conf[f]));
+        })
+      );
+      return touched && !r.days.length;
     });
     if (emptyRows.length) {
-      toast('有规则填了时间但没选星期几', 'err');
+      toast('有规则改了值但没选星期几', 'err');
       return;
     }
     const invalid = [];
@@ -218,15 +304,22 @@ const TimeRules = {
       for (const key of ['morning', 'afternoon']) {
         for (const field of ['start', 'end']) {
           const v = row[key][field];
-          if (v && !/^\d{2}:\d{2}$/.test(v)) invalid.push(v);
+          if (v && !/^\d{2}:\d{2}$/.test(v)) invalid.push(`时间 ${v}`);
+        }
+        for (const field of ['perInterval', 'interval']) {
+          const v = row[key][field];
+          if (v && (!Number.isFinite(Number(v)) || Number(v) <= 0)) invalid.push(`${field === 'interval' ? '间隔' : '号数'} ${v}`);
         }
       }
     }
     if (invalid.length) {
-      toast(`时间格式不对：${invalid[0]}`, 'err');
+      toast(`填得不对：${invalid[0]}`, 'err');
       return;
     }
-    this.doctor.timeRules = built;
+    // 按 id 找当前快照里的那位医生再写：弹窗开着期间如果快照被重新加载过，
+    // 手里这个引用可能已经不是数组里的对象了，直接写会丢掉改动
+    const target = (App.snapshot.doctors || []).find((d) => d.id === this.doctor.id) || this.doctor;
+    target.timeRules = built;
     Modals.close('modalRules');
     App.dirty = true;
     window.api.setDirty(true);
@@ -271,7 +364,13 @@ const CellTimeRule = {
   open(info) {
     this.info = info;
     const stored = (App.slotRules() || {})[`${info.date}|${info.shift}|${info.roomId}`] || null;
-    this.rule = { start: stored ? stored.start : '', end: stored ? stored.end : '' };
+    this.rule = { start: '', end: '', perInterval: '', interval: '' };
+    if (stored) {
+      this.rule.start = stored.start || '';
+      this.rule.end = stored.end || '';
+      this.rule.perInterval = numText(stored.perInterval);
+      this.rule.interval = numText(stored.interval);
+    }
     Modals.open('modalCellTime');
     this.render();
   },
@@ -295,14 +394,19 @@ const CellTimeRule = {
     };
     row('诊室', room ? room.name : '（已删除）');
     row('医生', doc ? doc.name : '（这一格还没排人）');
-    row('班次默认', conf.start ? `${hhmm(conf.start)}–${hhmm(conf.end)}` : '（未设置）');
-    row('当前实际', effective.start ? `${hhmm(effective.start)}–${hhmm(effective.end)}` : '—');
+    row('班次默认', conf.start ? `${hhmm(conf.start)}–${hhmm(conf.end)}，${conf.perInterval} 号/${conf.interval} 分钟` : '（未设置）');
+    row(
+      '当前实际',
+      effective.start
+        ? `${hhmm(effective.start)}–${hhmm(effective.end)}，${effective.perInterval} 号/${effective.interval} 分钟`
+        : '—'
+    );
     body.appendChild(kv);
 
     body.appendChild(
       el('p', {
         class: 'sub',
-        text: '只对这一个格子生效，不动这位医生的周规律，也不动班次默认时间。留空的项表示沿用上层（医生的规律或班次默认）。',
+        text: '只对这一个格子生效，不动这位医生的周规律，也不动班次默认。留空的项表示沿用上层（医生的规律或班次默认），可以只改其中一项。',
       })
     );
 
@@ -333,7 +437,37 @@ const CellTimeRule = {
     }
     body.appendChild(form);
 
-    // 这位医生自己的规律时间，方便一键照抄
+    // 第二行：两个间隔参数
+    const form2 = el('div', { class: 'rule-time-line' });
+    for (const [field, label, unit] of [['perInterval', '号数', '个/间隔'], ['interval', '间隔', '分钟']]) {
+      form2.appendChild(el('span', { class: 'rule-shift', text: label }));
+      const input = el('input', {
+        class: 'input sm num-input',
+        type: 'number',
+        min: '0',
+        value: this.rule[field] || '',
+      });
+      input.oninput = () => {
+        this.rule[field] = input.value;
+      };
+      form2.appendChild(input);
+      form2.appendChild(el('span', { class: 'rule-hint', text: unit }));
+      if (conf[field] !== undefined && conf[field] !== null && conf[field] !== '') {
+        form2.appendChild(
+          el('button', {
+            class: 'btn btn-sm btn-ghost',
+            text: `班次默认 ${conf[field]}`,
+            onclick: () => {
+              this.rule[field] = numText(conf[field]);
+              this.render();
+            },
+          })
+        );
+      }
+    }
+    body.appendChild(form2);
+
+    // 这位医生自己的规律，方便一键照抄
     if (doc) {
       const habit = doctorHabitTime(doc, day.weekday, info.shift, App.shifts);
       if (habit) {
@@ -341,10 +475,12 @@ const CellTimeRule = {
           el('div', { class: 'rule-time-line' }, [
             el('button', {
               class: 'btn btn-sm btn-ghost',
-              text: `用 ${doc.name} 的规律 ${hhmm(habit.start)}–${hhmm(habit.end)}`,
+              text: `用 ${doc.name} 的规律 ${hhmm(habit.start)}–${hhmm(habit.end)}，${habit.perInterval} 号/${habit.interval} 分钟`,
               onclick: () => {
                 this.rule.start = hhmm(habit.start);
                 this.rule.end = hhmm(habit.end);
+                this.rule.perInterval = numText(habit.perInterval);
+                this.rule.interval = numText(habit.interval);
                 this.render();
               },
             }),
@@ -355,7 +491,7 @@ const CellTimeRule = {
 
     if (App.slotRules()[`${info.date}|${info.shift}|${info.roomId}`]) {
       body.appendChild(
-        el('p', { class: 'rule-hint', text: '这一格当前已单独设过时间，点「清除这一格的时间设置」可以还原。' })
+        el('p', { class: 'rule-hint', text: '这一格当前已单独设过，点「清除这一格的时间设置」可以还原。' })
       );
     }
   },
@@ -363,8 +499,10 @@ const CellTimeRule = {
   async save() {
     const start = this.rule.start;
     const end = this.rule.end;
-    if (!start && !end) {
-      toast('开始和结束都空着等于没设置，可以点「清除这一格的时间设置」', 'warn');
+    const perInterval = this.rule.perInterval;
+    const interval = this.rule.interval;
+    if (!start && !end && !perInterval && !interval) {
+      toast('四项都空着等于没设置，可以点「清除这一格的时间设置」', 'warn');
       return;
     }
     for (const v of [start, end]) {
@@ -373,15 +511,27 @@ const CellTimeRule = {
         return;
       }
     }
+    for (const [v, label] of [[perInterval, '每个时间间隔号数'], [interval, '时间间隔（分钟）']]) {
+      if (v && (!Number.isFinite(Number(v)) || Number(v) <= 0)) {
+        toast(`${label}要填正数：${v}`, 'err');
+        return;
+      }
+    }
     try {
       await call(window.api.month.setSlotTime, App.ym, this.info.date, this.info.shift, this.info.roomId, {
         start: start ? `${start}:00` : '',
         end: end ? `${end}:00` : '',
+        perInterval: perInterval || null,
+        interval: interval || null,
       });
       await App.loadMonth(App.ym);
       ScheduleView.render();
       Modals.close('modalCellTime');
-      toast(`${App.ym} 这一格的时间已设为 ${start || '默认'}–${end || '默认'}`, 'ok');
+      const parts = [];
+      if (start || end) parts.push(`${start || '默认'}–${end || '默认'}`);
+      if (perInterval) parts.push(`${perInterval} 号/间隔`);
+      if (interval) parts.push(`${interval} 分钟`);
+      toast(`这一格已设为 ${parts.join('，')}`, 'ok');
     } catch (err) {
       toast(`设置失败：${err.message}`, 'err');
     }
@@ -406,14 +556,20 @@ const CellTimeRule = {
   },
 };
 
-/** 取医生在某个星期几、某个班次的规律时间（没配就返回 null） */
+/** 取医生在某个星期几、某个班次的规律（没配就返回 null） */
 function doctorHabitTime(doctor, weekday, shiftName, shifts) {
   const conf = (shifts || []).find((s) => s.name === shiftName) || {};
   for (const rule of (doctor && doctor.timeRules) || []) {
     if (!Array.isArray(rule.days) || !rule.days.includes(weekday)) continue;
     const hit = rule.shifts && rule.shifts[shiftName];
     if (!hit) continue;
-    return { start: hit.start || conf.start, end: hit.end || conf.end, customized: true };
+    return {
+      start: hit.start || conf.start,
+      end: hit.end || conf.end,
+      perInterval: hit.perInterval === null || hit.perInterval === undefined ? conf.perInterval : hit.perInterval,
+      interval: hit.interval === null || hit.interval === undefined ? conf.interval : hit.interval,
+      customized: true,
+    };
   }
   return null;
 }

@@ -4,6 +4,7 @@
  * 用法：node scripts/test-ui.js
  */
 const fs = require('fs');
+require('./test-env');
 const path = require('path');
 const { JSDOM } = require('jsdom');
 const store = require('../lib/store');
@@ -47,7 +48,8 @@ const fakeApi = {
     }),
   month: {
     get: (ym) => {
-      const roster = store.loadDoctors();
+      // 用 data-smoke 里的虚构样例，不读磁盘 data/（测试必须自洽，也不能碰真实数据）
+      const roster = { doctors: doctorsData.doctors };
       const { month } = store.reconcileMonth(scheduleData, ym);
       const { year, month: mon } = store.parseYm(ym);
       return ok({

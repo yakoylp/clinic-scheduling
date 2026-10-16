@@ -265,6 +265,28 @@ const SettingsView = {
       tr.appendChild(
         el('td', null, [el('input', { class: 'input', value: shift.end, dataset: { field: 'end' }, placeholder: '12:00:00' })])
       );
+      tr.appendChild(
+        el('td', null, [
+          el('input', {
+            class: 'input',
+            value: shift.perInterval === undefined || shift.perInterval === null ? '' : String(shift.perInterval),
+            dataset: { field: 'perInterval' },
+            placeholder: '如 1',
+            title: '每个时间间隔放几个号 → 导出表「每个时间间隔号数」列',
+          }),
+        ])
+      );
+      tr.appendChild(
+        el('td', null, [
+          el('input', {
+            class: 'input',
+            value: shift.interval === undefined || shift.interval === null ? '' : String(shift.interval),
+            dataset: { field: 'interval' },
+            placeholder: '如 8',
+            title: '每隔几分钟放一次号 → 导出表「时间间隔（分钟）」列',
+          }),
+        ])
+      );
       tbody.appendChild(tr);
     }
 
@@ -308,7 +330,27 @@ const SettingsView = {
         return { error: `「${name}」的时间格式要像 08:00` };
       }
       const norm = (t) => (t.split(':').length === 2 ? `${t}:00` : t).padStart(8, '0');
-      shifts.push({ name, start: norm(get('start')), end: norm(get('end')) });
+      // 两个间隔参数：留空就用出厂默认；填了必须是正数
+      const count = (field, label, fallback) => {
+        const raw = get(field);
+        if (!raw) return fallback;
+        const n = Number(raw);
+        if (!Number.isFinite(n) || n <= 0) {
+          return { error: `「${name}」的${label}要填正数` };
+        }
+        return n;
+      };
+      const perInterval = count('perInterval', '每个时间间隔号数', null);
+      if (perInterval && perInterval.error) return { error: perInterval.error };
+      const interval = count('interval', '时间间隔（分钟）', null);
+      if (interval && interval.error) return { error: interval.error };
+      shifts.push({
+        name,
+        start: norm(get('start')),
+        end: norm(get('end')),
+        perInterval: perInterval === null ? undefined : perInterval,
+        interval: interval === null ? undefined : interval,
+      });
     }
     return {
       value: {

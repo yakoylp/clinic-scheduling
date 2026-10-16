@@ -9,6 +9,7 @@
  */
 const fs = require('fs');
 const os = require('os');
+require('./test-env');
 const path = require('path');
 const store = require('../lib/store');
 const exporter = require('../lib/export');
@@ -173,8 +174,88 @@ console.log('== 6. 格子级时间设置（优先级最高） ==');
   check('班次默认时不算自定义', r4.customized, false);
 
   check('空的格子设置等于没设置', store.normalizeSlotRule({ start: '', end: '' }), null);
-  check('简写时间会被补全', JSON.stringify(store.normalizeSlotRule({ start: '9:00', end: '' })), '{"start":"09:00:00","end":""}');
-  check('只填结束时间也保留', JSON.stringify(store.normalizeSlotRule({ start: '', end: '11:30' })), '{"start":"","end":"11:30:00"}');
+  check(
+    '简写时间会被补全',
+    JSON.stringify(store.normalizeSlotRule({ start: '9:00', end: '' })),
+    '{"start":"09:00:00","end":"","perInterval":null,"interval":null}'
+  );
+  check(
+    '只填结束时间也保留',
+    JSON.stringify(store.normalizeSlotRule({ start: '', end: '11:30' })),
+    '{"start":"","end":"11:30:00","perInterval":null,"interval":null}'
+  );
+}
+
+console.log('== 6a. 号数 / 间隔（分钟）：同样是三层，且按项各自回退 ==');
+{
+  const shift = {
+    name: '上午',
+    start: '08:00:00',
+    end: '12:00:00',
+    perInterval: 1,
+    interval: 8,
+  };
+  const brief = (t) => `${t.start}|${t.end}|${t.perInterval}号|${t.interval}分|${t.source}`;
+
+  // 谁都没设 → 班次默认
+  check('全默认', brief(store.resolveCellShiftTime({ weekday: 0, shift })), '08:00:00|12:00:00|1号|8分|shift');
+
+  // 医生只改了间隔 → 间隔用医生的，其余仍是班次默认
+  const docIntervalOnly = { timeRules: [{ days: [1], shifts: { 上午: { interval: 6 } } }] };
+  check(
+    '医生只改间隔',
+    brief(store.resolveCellShiftTime({ doctor: docIntervalOnly, weekday: 1, shift })),
+    '08:00:00|12:00:00|1号|6分|doctor'
+  );
+
+  // 医生改了开始时间 + 号数 → 各自生效
+  const docBoth = { timeRules: [{ days: [2], shifts: { 上午: { start: '08:30:00', perInterval: 2 } } }] };
+  check(
+    '医生改开始时间+号数',
+    brief(store.resolveCellShiftTime({ doctor: docBoth, weekday: 2, shift })),
+    '08:30:00|12:00:00|2号|8分|doctor'
+  );
+
+  // 格子只改间隔 → 盖上医生的号数，开始时间仍来自医生
+  check(
+    '格子只改间隔（医生那层不动）',
+    brief(store.resolveCellShiftTime({ slotRule: { interval: 5 }, doctor: docBoth, weekday: 2, shift })),
+    '08:30:00|12:00:00|2号|5分|cell'
+  );
+
+  // 格子只改号数 → 间隔回落到医生/班次
+  check(
+    '格子只改号数',
+    brief(store.resolveCellShiftTime({ slotRule: { perInterval: 3 }, doctor: docIntervalOnly, weekday: 1, shift })),
+    '08:00:00|12:00:00|3号|6分|cell'
+  );
+
+  // 班次缺少两个参数（老数据）→ 用出厂默认
+  const legacyShift = { name: '上午', start: '08:00:00', end: '12:00:00' };
+  check(
+    '老数据班次没有这两个参数时用出厂默认',
+    brief(store.resolveCellShiftTime({ shift: legacyShift })),
+    '08:00:00|12:00:00|1号|8分|shift'
+  );
+
+  console.log('== 6a-2. 号数 / 间隔的数值校验 ==');
+  check('0 不合法 → 用兜底', store.normalizeCount(0, 1), 1);
+  check('负数不合法 → 用兜底', store.normalizeCount(-2, 8), 8);
+  check('abc 不合法 → 用兜底', store.normalizeCount('abc', 8), 8);
+  check('7.5 允许（非整数分钟）', store.normalizeCount('7.5', 8), 7.5);
+  check('两位小数封顶', store.normalizeCount('1.239', 8), 1.24);
+  check('正常整数原样', store.normalizeCount('12', 8), 12);
+  check(
+    '只写号数的格子设置保留',
+    JSON.stringify(store.normalizeSlotRule({ perInterval: 2 })),
+    '{"start":"","end":"","perInterval":2,"interval":null}'
+  );
+  check('全部为空还是 null', store.normalizeSlotRule({ start: '', perInterval: '' }), null);
+  check(
+    '医生规律里只写间隔也能存',
+    JSON.stringify(store.normalizeTimeRules([{ days: [1], shifts: { 上午: { interval: '10' } } }])),
+    '[{"days":[1],"shifts":{"上午":{"start":"","end":"","perInterval":null,"interval":10}}}]'
+  );
 }
 
 console.log('== 6b. 脏 / 失效的格子级设置会被清理 ==');
@@ -241,6 +322,61 @@ console.log('== 7. handlers 存 / 清格子时间，并且导出用得上 ==');
     const row = rows.find((r) => r.date === target && r.shift === '上午');
     check('导出行开始时间', row.start, `${target} 09:15:00`);
     check('导出行结束时间', row.end, `${target} 11:45:00`);
+
+    console.log('== 7b. 两个间隔参数：科室默认 / 医生规律 / 格子级，导出取到正确值 ==');
+    {
+      const key = `${target}|上午|${rooms[0].id}`;
+      // 科室默认（出厂 1 / 8）
+      const defRow = exporter
+        .buildRows({ doctors: handlers.snapshot().doctors }, store.loadSchedule(), M, {})
+        .rows.find((r) => r.date === target && r.shift === '上午');
+      check('科室默认号数进导出', defRow.cells[10], String(store.DEFAULT_PER_INTERVAL));
+      check('科室默认间隔进导出', defRow.cells[11], String(store.DEFAULT_INTERVAL_MINUTES));
+
+      // 医生级：只改这个班次的间隔
+      const docs = handlers.saveDoctors(
+        handlers.snapshot().doctors.map((d) =>
+          Object.assign({}, d, { timeRules: [{ days: [2], shifts: { 上午: { interval: 6 } } }] })
+        )
+      );
+      const docRow = exporter
+        .buildRows({ doctors: docs }, store.loadSchedule(), M, {})
+        .rows.find((r) => r.date === target && r.shift === '上午');
+      check('医生规律的间隔进导出', docRow.cells[11], '6');
+      check('医生规律没动号数（回落到班次默认）', docRow.cells[10], String(store.DEFAULT_PER_INTERVAL));
+
+      // 格子级：只改号数，间隔仍来自医生规律
+      handlers.setSlotTime(M, target, '上午', rooms[0].id, { start: '09:15:00', end: '11:45:00', perInterval: 3 });
+      const cellRow = exporter
+        .buildRows({ doctors: handlers.snapshot().doctors }, store.loadSchedule(), M, {})
+        .rows.find((r) => r.date === target && r.shift === '上午');
+      check('格子号数进导出', cellRow.cells[10], '3');
+      check('格子没改间隔时沿用医生规律', cellRow.cells[11], '6');
+      check('格子的开始时间还在', cellRow.cells[2], `${target} 09:15:00`);
+
+      // 科室设置里把默认间隔改成 12，所有人都跟着变
+      handlers.saveSettings({
+        orgName: '',
+        deptName: '',
+        triageDesk: '',
+        shifts: [
+          { name: '上午', start: '08:00:00', end: '12:00:00', perInterval: 2, interval: 12 },
+          { name: '下午', start: '14:30:00', end: '17:30:00', perInterval: 1, interval: 8 },
+        ],
+      });
+      const shifted = exporter
+        .buildRows({ doctors: handlers.snapshot().doctors }, store.loadSchedule(), M, {})
+        .rows.find((r) => r.date === target && r.shift === '上午');
+      check('改了科室默认后：格子级号数仍优先', shifted.cells[10], '3');
+      check('改了科室默认后：医生间隔仍优先', shifted.cells[11], '6');
+      const otherDay = exporter
+        .buildRows({ doctors: handlers.snapshot().doctors }, store.loadSchedule(), M, {})
+        .rows.find((r) => r.date !== target && r.shift === '上午');
+      if (otherDay) {
+        check('其他没设过的格子跟着科室默认走', otherDay.cells[11], '12');
+      }
+      void key;
+    }
 
     // 清除
     handlers.clearSlotTime(M, target, '上午', rooms[0].id);

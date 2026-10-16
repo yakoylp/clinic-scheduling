@@ -303,8 +303,11 @@ table.mini tr:last-child td { border-bottom: 0; }
 .day-btn:hover { border-color: #b9c3d6; }
 .day-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 700; }
 .rule-time-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+/* 第二条（号数 / 间隔）和上面那条的输入框左边对齐 */
+.rule-time-line-2 { margin-top: 2px; }
 .rule-shift { width: 34px; font-size: 13px; font-weight: 600; color: #4b5563; }
 .time-input { width: 104px; }
+.num-input { width: 78px; }
 .rule-hint { font-size: 12px; color: var(--text-dim); }
 .time-cell .btn { white-space: nowrap; }
 

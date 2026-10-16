@@ -6,6 +6,7 @@
  */
 const fs = require('fs');
 const os = require('os');
+require('./test-env');
 const path = require('path');
 const handlers = require('../lib/handlers');
 const store = require('../lib/store');
@@ -47,7 +48,12 @@ process.on('exit', () => {
 console.log('== 状态快照 ==');
 const snap = handlers.snapshot();
 checkTrue('快照能读出来', !!snap, JSON.stringify(snap.months));
-check('导出列定义 10 列', snap.exportColumns.length, 10);
+check('导出列定义 12 列', snap.exportColumns.length, 12);
+checkTrue(
+  '最后两列是号数和间隔',
+  snap.exportColumns.slice(10).join('|') === '每个时间间隔号数|时间间隔（分钟）',
+  snap.exportColumns.slice(10).join('|')
+);
 
 // 先导一份示例数据进来，后面的用例都有东西可测
 const fixture = sample.buildSampleWorkbook();

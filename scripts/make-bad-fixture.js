@@ -4,6 +4,7 @@
  * 有一格写了超长乱文本。数据全部虚构。
  * 用法：node scripts/make-bad-fixture.js [输出路径]
  */
+require('./test-env');
 const path = require('path');
 const os = require('os');
 const XLSX = require('xlsx');

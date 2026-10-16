@@ -1,6 +1,7 @@
 'use strict';
 /** 建一份测试用数据（不碰真实 data/），供前端冒烟测试用。数据全部是虚构样例。 */
 const fs = require('fs');
+require('./test-env');
 const path = require('path');
 const store = require('../lib/store');
 const legacy = require('../lib/import-legacy');
