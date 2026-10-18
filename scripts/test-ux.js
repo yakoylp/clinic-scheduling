@@ -409,6 +409,121 @@ function snapshotFromData(overrides) {
     checkTrue('有快捷添加按钮', doc.querySelectorAll('#rulesBody .preset-bar button').length >= 3);
   }
 
+  console.log('== 一个医生可以配任意多条规律 ==');
+  {
+    const snapshot = snapshotFromData({});
+    const doctor = snapshot.doctors[0];
+    doctor.timeRules = [];
+    const w = await boot(snapshot);
+    const doc = w.document;
+    const App = w.__app.App;
+    const TR = w.__app.TimeRules;
+
+    w.__app.switchTab('doctors');
+    const row = doc.querySelector(`#doctorTbody tr[data-id="${doctor.id}"]`);
+    const openDialog = () => row.querySelector('.time-cell .btn').click();
+
+    openDialog();
+    checkTrue('规律弹窗打开', !doc.querySelector('#modalRules').hidden);
+    check('没配规律时不硬造一条空规则', doc.querySelectorAll('#rulesBody .rule-card').length, 0);
+    checkTrue('空状态有说明', doc.querySelector('#rulesBody').textContent.includes('没有特殊规律'));
+
+    // 有独立的「新增一条规律」按钮
+    const addBtn = [...doc.querySelectorAll('#rulesBody .preset-bar button')].find((b) => b.textContent.includes('新增一条规律'));
+    checkTrue('有「＋ 新增一条规律」按钮', !!addBtn);
+    addBtn.click();
+    check('点一下多一条规则卡', doc.querySelectorAll('#rulesBody .rule-card').length, 1);
+    addBtn.click();
+    addBtn.click();
+    check('可以连着加到 3 条', doc.querySelectorAll('#rulesBody .rule-card').length, 3);
+
+    // 给三条分别配不同星期几和不同值
+    const cards = () => [...doc.querySelectorAll('#rulesBody .rule-card')];
+    const setDays = (card, days) => {
+      for (let d = 0; d < 7; d += 1) {
+        const btn = [...card.querySelectorAll('.day-btn')][d];
+        if (btn.classList.contains('active') !== days.includes(d)) btn.click();
+      }
+    };
+    const setTime = (card, field, value) => {
+      const input = [...card.querySelectorAll('.time-input')][field];
+      input.value = value;
+      input.dispatchEvent(new w.Event('input', { bubbles: true }));
+    };
+    setDays(cards()[0], [1, 2]);
+    setTime(cards()[0], 0, '08:30');
+    setDays(cards()[1], [3]);
+    setTime(cards()[1], 0, '09:15');
+    setDays(cards()[2], [6, 0]);
+    setTime(cards()[2], 0, '10:00');
+    checkTrue('没有重复设置提示', !doc.querySelector('#rulesBody .rule-conflict'));
+
+    await TR.save();
+    await new Promise((r) => setTimeout(r, 500));
+
+    const saved = (App.snapshot.doctors.find((d) => d.id === doctor.id) || {}).timeRules || [];
+    check('三条规律都存下来了', saved.length, 3);
+    check('三条的星期分组都对', saved.map((r) => r.days.join('')).join('|'), '12|3|06');
+    check('三条的开始时间都对', saved.map((r) => r.shifts['上午'].start).join('|'), '08:30:00|09:15:00|10:00:00');
+
+    // 三个星期几各按各的规律算（先把这位医生排到那三天的格子里）
+    const monday = App.days.find((d) => d.weekday === 1);
+    const wednesday = App.days.find((d) => d.weekday === 3);
+    const saturday = App.days.find((d) => d.weekday === 6);
+    const morning = App.shifts[0];
+    const room = App.rooms[0];
+    App.applyChanges(
+      [monday, wednesday, saturday].map((d) => ({
+        date: d.date,
+        shift: morning.name,
+        roomId: room.id,
+        doctorId: doctor.id,
+      }))
+    );
+    const keyOf = (d) => App.slotKey(d.date, morning.name, room.id);
+    check('周一的规律生效', App.slotTime(keyOf(monday)).start, '08:30:00');
+    check('周三的规律生效', App.slotTime(keyOf(wednesday)).start, '09:15:00');
+    check('周六的规律生效', App.slotTime(keyOf(saturday)).start, '10:00:00');
+
+    // 重复设置同一「星期几+班次」要被拦下来
+    openDialog();
+    check('重新打开读出三条', doc.querySelectorAll('#rulesBody .rule-card').length, 3);
+    // 第 1 条加上周三（周二=2，周三=3），和第 2 条（周三）冲突
+    const allDayBtns = [...doc.querySelectorAll('#rulesBody .rule-card')[0].querySelectorAll('.day-btn')];
+    allDayBtns[3].click();
+    checkTrue('界面立刻提示重复设置', !!doc.querySelector('#rulesBody .rule-conflict'));
+    checkTrue(
+      '提示里点了冲突的星期和班次',
+      /周三.*上午/.test(doc.querySelector('#rulesBody .rule-conflict').textContent),
+      doc.querySelector('#rulesBody .rule-conflict').textContent
+    );
+    const beforeSave = JSON.stringify((App.snapshot.doctors.find((d) => d.id === doctor.id) || {}).timeRules);
+    await TR.save();
+    await new Promise((r) => setTimeout(r, 400));
+    const afterSave = JSON.stringify((App.snapshot.doctors.find((d) => d.id === doctor.id) || {}).timeRules);
+    checkTrue('有冲突时拒绝保存，数据没被改坏', beforeSave === afterSave);
+    checkTrue('弹窗还开着等用户处理', !doc.querySelector('#modalRules').hidden);
+    checkTrue(
+      '弹出了错误提示',
+      (doc.querySelector('#toastWrap') || {}).textContent && doc.querySelector('#toastWrap').textContent.includes('重复设置'),
+      doc.querySelector('#toastWrap') ? doc.querySelector('#toastWrap').textContent.slice(0, 80) : '(无)'
+    );
+
+    // 同一星期几、不同班次是合法的（不冲突）
+    w.__app.TimeRules.cancel();
+    const snapshot2 = snapshotFromData({});
+    snapshot2.doctors[0].timeRules = [
+      { days: [2], shifts: { 上午: { start: '08:30:00' } } },
+      { days: [2], shifts: { 下午: { start: '15:00:00' } } },
+    ];
+    const w2 = await boot(snapshot2);
+    w2.__app.switchTab('doctors');
+    const row2 = w2.document.querySelector(`#doctorTbody tr[data-id="${snapshot2.doctors[0].id}"]`);
+    row2.querySelector('.time-cell .btn').click();
+    check('同一天不同班次不算冲突', w2.document.querySelector('#rulesBody .rule-conflict'), null);
+    check('两条都读出来了', w2.document.querySelectorAll('#rulesBody .rule-card').length, 2);
+  }
+
   console.log('== 行高规则（防止颜色块比格子矮） ==');
   {
     const css = fs.readFileSync(path.join(ROOT, 'public', 'styles.css'), 'utf8');

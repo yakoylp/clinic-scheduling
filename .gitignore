@@ -5,7 +5,12 @@ data/
 data-smoke/
 导出/
 github/
+github.git/
+.local/
 *.log
+
+# reset-data.js --force 之前的自动备份
+data.bak-*/
 
 # 本地产出的临时文件
 ~$*.xlsx

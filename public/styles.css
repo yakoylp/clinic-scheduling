@@ -289,6 +289,11 @@ table.mini tr:last-child td { border-bottom: 0; }
 
 /* ---------------- 出诊时间规律弹窗 ---------------- */
 .preset-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0 6px; }
+/* 同一个「星期几 + 班次」被多条规律重复设置时的提示条 */
+.rule-conflict {
+  margin-top: 10px; padding: 8px 12px; border-radius: 8px; font-size: 12.5px; line-height: 1.6;
+  background: #fff4f2; border: 1px solid #f6c1b8; color: #a4341f;
+}
 .rule-card {
   border: 1px solid var(--line-strong); border-radius: 10px;
   padding: 10px 12px; margin-bottom: 10px; background: #f8fafd;

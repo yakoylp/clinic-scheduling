@@ -7,6 +7,8 @@
  */
 
 const DAY_LABELS = ['日', '一', '二', '三', '四', '五', '六'];
+/** 一个规则卡里有两块：上午 / 下午 */
+const SHIFT_KEYS = [['上午', 'morning'], ['下午', 'afternoon']];
 const PRESETS = [
   { label: '工作日（一~五）', days: [1, 2, 3, 4, 5] },
   { label: '周末（六日）', days: [0, 6] },
@@ -63,14 +65,33 @@ function hhmm(value) {
   return value ? String(value).slice(0, 5) : '';
 }
 
-/** 一个班次这一行里，有哪几项和班次默认不同（哪几项会被写进规则） */
+/**
+ * 一个班次这一行里，有哪几项和班次默认不同（只有这些会写进规则）。
+ * 注意：空字符串表示「沿用下层」，**不算改过**——否则从已存规则读回来的行
+ * （未设置的项是空串）会被误判成「改了这个班次」，进而误报星期几冲突。
+ */
 function changedFields(block, conf) {
   const out = {};
-  if ((block.start || '') !== hhmm(conf.start)) out.start = block.start;
-  if ((block.end || '') !== hhmm(conf.end)) out.end = block.end;
-  if ((block.perInterval || '') !== numText(conf.perInterval)) out.perInterval = block.perInterval;
-  if ((block.interval || '') !== numText(conf.interval)) out.interval = block.interval;
+  const consider = (field, value, base) => {
+    const cur = value === null || value === undefined ? '' : String(value);
+    if (cur === '' || cur === base) return;
+    out[field] = cur;
+  };
+  consider('start', block.start, hhmm(conf.start));
+  consider('end', block.end, hhmm(conf.end));
+  consider('perInterval', block.perInterval, numText(conf.perInterval));
+  consider('interval', block.interval, numText(conf.interval));
   return out;
+}
+
+/** 取某个班次的默认定义 */
+function shiftConf(shiftName) {
+  return (App.shifts || []).find((s) => s.name === shiftName) || {};
+}
+
+/** 这个班次这一行有没有真的改过任何一项 */
+function blockChanged(block, shiftName) {
+  return Object.keys(changedFields(block, shiftConf(shiftName))).length > 0;
 }
 
 /** 行 -> 内部规则（和班次默认一样的不写入，保证「没配规则」的医生不留空壳规则） */
@@ -125,7 +146,7 @@ const TimeRules = {
   open(doctor) {
     this.doctor = doctor;
     this.rows = rulesToRows(doctor.timeRules);
-    if (!this.rows.length) this.rows.push(blankRow([1, 2, 3, 4, 5]));
+    if (!this.rows.length) this.rows = [];
     $('#rulesTitle').textContent = `出诊时间规律 — ${doctor.name || '（未命名医生）'}`;
     Modals.open('modalRules');
     this.render();
@@ -137,7 +158,9 @@ const TimeRules = {
     body.appendChild(
       el('p', {
         class: 'sub',
-        text: '默认情况下这位医生跟着「科室设置」里的班次时间出诊。如果他有固定习惯（比如工作日 8:30 开始、周末 8:00 开始），在这里按星期几配好，排班和导出都会自动用这个时间，不用每个月重设。留空的项表示沿用班次默认时间。',
+        text: '默认情况下这位医生跟着「科室设置」里的班次出诊。有固定习惯就在这里按星期几配好，'
+          + '一条规律管一个「星期几 + 班次」组合，可以加任意多条；排班和导出都会自动按这些规律算，不用每个月重设。'
+          + '留空的项表示沿用班次默认。',
       })
     );
 
@@ -156,15 +179,72 @@ const TimeRules = {
         })
       );
     }
+    // 自己挑星期几的单条规律，不限那三个模板
+    presetBar.appendChild(
+      el('button', {
+        class: 'btn btn-sm btn-primary',
+        text: '＋ 新增一条规律',
+        title: '新增一张空白规则卡，自己勾星期几',
+        onclick: () => {
+          // 默认勾上还没被占用的那一天，省得和现有规律打架
+          const used = new Set();
+          for (const r of this.rows) for (const d of r.days) used.add(d);
+          const free = [1, 2, 3, 4, 5, 6, 0].find((d) => !used.has(d));
+          this.rows.push(blankRow(free === undefined ? [] : [free]));
+          this.render();
+        },
+      })
+    );
     body.appendChild(presetBar);
 
     if (!this.rows.length) {
-      body.appendChild(el('div', { class: 'empty-block', text: '这条医生没有特殊规律，完全跟班次默认时间走。' }));
+      body.appendChild(el('div', { class: 'empty-block', text: '这位医生没有特殊规律，完全跟班次默认走。' }));
     }
 
     this.rows.forEach((row, index) => {
       body.appendChild(this.ruleCard(row, index));
     });
+
+    // 冲突提示：同一个「星期几 + 班次」被多条规律重复设置时，只有第一条生效，这里提前说出来
+    const conflicts = this.findConflicts(this.rows);
+    if (conflicts.length) {
+      body.appendChild(
+        el('div', { class: 'rule-conflict' }, [
+          el('b', { text: '⚠ 有重复设置：' }),
+          el('span', {
+            text:
+              conflicts.map((c) => `周${DAY_LABELS[c.weekday]} ${c.shift}`).join('、')
+              + ' 被多条规律重复设置，只有从上往下第一条会生效。请合并或删掉多余的。',
+          }),
+        ])
+      );
+    }
+  },
+
+  /**
+   * 找出「同一个星期几 + 同一个班次」被多条规律同时设置的情况。
+   * 规则是按顺序第一条命中的，重复设置会让后面的形同虚设，所以要提示。
+   */
+  findConflicts(rows) {
+    const seen = new Map();
+    const out = [];
+    for (const row of rows) {
+      for (const day of row.days) {
+        for (const [shiftName, key] of SHIFT_KEYS) {
+          // 只有「真的改了值」才算设置了这个班次
+          if (!blockChanged(row[key], shiftName)) continue;
+          const k = `${day}|${shiftName}`;
+          if (seen.has(k)) {
+            if (!out.some((c) => c.weekday === day && c.shift === shiftName)) {
+              out.push({ weekday: day, shift: shiftName, rules: [seen.get(k), row] });
+            }
+          } else {
+            seen.set(k, row);
+          }
+        }
+      }
+    }
+    return out;
   },
 
   ruleCard(row, index) {
@@ -270,13 +350,8 @@ const TimeRules = {
       }
       card.appendChild(line2);
 
-      // 一整块都和班次默认一样时提示一下，避免用户以为没生效
-      const sameAsDefault =
-        hhmm(conf.start) === (row[key].start || '') &&
-        hhmm(conf.end) === (row[key].end || '') &&
-        numText(conf.perInterval) === (row[key].perInterval || '') &&
-        numText(conf.interval) === (row[key].interval || '');
-      if (sameAsDefault) {
+      // 这一块没改动任何一项时提示一下，避免用户以为填了却没生效
+      if (!blockChanged(row[key], shiftName)) {
         line2.appendChild(el('span', { class: 'rule-hint', text: '与班次默认相同' }));
       }
     }
@@ -286,17 +361,12 @@ const TimeRules = {
 
   async save() {
     const built = rowsToRules(this.rows);
-    const emptyRows = this.rows.filter((r) => {
-      const touched = ['morning', 'afternoon'].some((k) =>
-        ['start', 'end', 'perInterval', 'interval'].some((f) => {
-          const conf = (App.shifts || []).find((s) => s.name === (k === 'morning' ? '上午' : '下午')) || {};
-          return (r[k][f] || '') !== (f === 'start' || f === 'end' ? hhmm(conf[f]) : numText(conf[f]));
-        })
-      );
-      return touched && !r.days.length;
-    });
+    // 改了值却没勾星期几的规则不可能生效，拦下来
+    const emptyRows = this.rows.filter(
+      (r) => (blockChanged(r.morning, '上午') || blockChanged(r.afternoon, '下午')) && !r.days.length
+    );
     if (emptyRows.length) {
-      toast('有规则改了值但没选星期几', 'err');
+      toast('有规则改了值但没勾星期几，请勾上或删掉这条', 'err');
       return;
     }
     const invalid = [];
@@ -316,6 +386,17 @@ const TimeRules = {
       toast(`填得不对：${invalid[0]}`, 'err');
       return;
     }
+    // 同一个「星期几 + 班次」被多条规律重复设置时，后面的永远不会生效 —— 说清楚，别让它悄悄不生效
+    const conflicts = this.findConflicts(this.rows);
+    if (conflicts.length) {
+      const names = conflicts.map((c) => `周${DAY_LABELS[c.weekday]} ${c.shift}`).join('、');
+      toast(`这些被多条规则重复设置，请先合并或删掉多余的：${names}`, 'err');
+      return;
+    }
+
+    // 一行都没改的和班次默认完全一样，存进去也只是空壳，跳过并告知用户
+    const skipped = this.rows.length - built.length;
+
     // 按 id 找当前快照里的那位医生再写：弹窗开着期间如果快照被重新加载过，
     // 手里这个引用可能已经不是数组里的对象了，直接写会丢掉改动
     const target = (App.snapshot.doctors || []).find((d) => d.id === this.doctor.id) || this.doctor;
@@ -326,7 +407,13 @@ const TimeRules = {
     await DoctorsView.save(true);
     await App.loadMonth(App.ym);
     ScheduleView.render();
-    toast(built.length ? `已保存 ${this.doctor.name} 的 ${built.length} 条时间规律` : `已清除 ${this.doctor.name} 的时间规律`, 'ok');
+    const skippedNote = skipped > 0 ? `（另有 ${skipped} 条和班次默认完全相同，已跳过）` : '';
+    toast(
+      built.length
+        ? `已保存 ${this.doctor.name} 的 ${built.length} 条时间规律${skippedNote}`
+        : `已清除 ${this.doctor.name} 的时间规律${skippedNote}`,
+      'ok'
+    );
   },
 
   clearAll() {
