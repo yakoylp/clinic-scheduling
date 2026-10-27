@@ -165,7 +165,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check(`格子总数（${fixture.days} 天 × ${fixture.shifts} 班 × ${fixture.rooms} 诊室）`, cells.length, expectedCells);
   const filled = cells.filter((c) => !c.classList.contains('empty'));
   check('已排格子数', filled.length, fixture.filled);
-  check('顶部排班医生按钮数', $$('#palette .doc-chip').length, doctorsData.doctors.filter((d) => !d.archived).length);
+  // 医生按钮 + 末尾多一个「清空」画笔
+  check(
+    '顶部排班医生按钮数',
+    $$('#palette .doc-chip').length,
+    doctorsData.doctors.filter((d) => !d.archived).length + 1
+  );
+  checkTrue('选择条末尾有「清空」画笔', $$('#palette .doc-chip-clear').length === 1, $$('#palette').textContent);
   check('侧栏不再有医生列表', $('#palette').closest('.side') ? 1 : 0, 0);
   checkTrue('进度文字有内容', new RegExp(`\\d+ / ${expectedCells}`).test($('#progText').textContent), $('#progText').textContent);
   checkTrue('医生统计表行数等于医生数', $$('#statDoctors tbody tr').length === doctorsData.doctors.filter((d) => !d.archived).length, `${$$('#statDoctors tbody tr').length} 行`);

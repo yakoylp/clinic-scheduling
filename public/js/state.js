@@ -18,6 +18,8 @@ const App = {
   month: null,
   stats: null,
   brushId: null,
+  /** 是否处于「清空」画笔模式（左键清空、右键撤回） */
+  brushClear: false,
   mode: 'paint',
   selected: null, // { date, shift, roomId }
   dirty: false,
@@ -378,6 +380,14 @@ const App = {
   /* ---------------- 画笔 ---------------- */
   setBrush(id) {
     this.brushId = this.brushId === id ? null : id;
+    // 选了具体医生就不再是「清空」画笔
+    this.brushClear = false;
+    this.emit({ type: 'brush' });
+  },
+  /** 「清空」画笔：左键清空格子，右键撤回对该格的清空 */
+  setClearBrush(on) {
+    this.brushClear = typeof on === 'boolean' ? on : !this.brushClear;
+    if (this.brushClear) this.brushId = null;
     this.emit({ type: 'brush' });
   },
   setMode(mode) {

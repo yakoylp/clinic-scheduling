@@ -170,8 +170,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!meta) {
       if (event.key === 'Escape') {
         if ($$('.modal:not([hidden])').length) Modals.closeAll();
-        else if (App.brushId) {
+        else if (App.brushId || App.brushClear) {
           App.brushId = null;
+          App.brushClear = false;
           App.emit({ type: 'brush' });
         }
       }

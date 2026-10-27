@@ -253,7 +253,9 @@ const SettingsView = {
     };
     set('#setOrgName', s.orgName);
     set('#setDeptName', s.deptName);
+    set('#setBusinessDeptName', s.businessDeptName);
     set('#setTriageDesk', s.triageDesk);
+    set('#setOnsiteCount', s.onsiteCount === undefined || s.onsiteCount === null ? '' : String(s.onsiteCount));
 
     const tbody = clear($('#shiftTbody'));
     for (const shift of App.shifts) {
@@ -298,7 +300,7 @@ const SettingsView = {
       input.onchange = input.oninput;
       input.onblur = () => this.save(true);
     }
-    for (const id of ['#setOrgName', '#setDeptName', '#setTriageDesk']) {
+    for (const id of ['#setOrgName', '#setDeptName', '#setBusinessDeptName', '#setTriageDesk', '#setOnsiteCount']) {
       const input = $(id);
       if (!input) continue;
       input.oninput = () => {
@@ -352,11 +354,21 @@ const SettingsView = {
         interval: interval === null ? undefined : interval,
       });
     }
+    // 现场号数：整张表一个值，留空按 0
+    const onsiteRaw = $('#setOnsiteCount').value.trim();
+    let onsiteCount = 0;
+    if (onsiteRaw) {
+      const n = Number(onsiteRaw);
+      if (!Number.isFinite(n) || n < 0) return { error: '现场号数要填 0 或正整数' };
+      onsiteCount = n;
+    }
     return {
       value: {
         orgName: $('#setOrgName').value.trim(),
         deptName: $('#setDeptName').value.trim(),
+        businessDeptName: $('#setBusinessDeptName').value.trim(),
         triageDesk: $('#setTriageDesk').value.trim(),
+        onsiteCount,
         shifts,
       },
     };

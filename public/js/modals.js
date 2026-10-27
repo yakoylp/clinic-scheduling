@@ -130,7 +130,8 @@ const ExportFlow = {
   /** 重新打开并试算（不动已经选好的导出位置） */
   async renderPreview() {
     const paths = App.snapshot.paths;
-    if (!this.dir) this.dir = paths.exportDir;
+    // 默认导出到桌面；桌面拿不到再退回原来的导出目录
+    if (!this.dir) this.dir = paths.desktop || paths.exportDir;
     Modals.open('modalExport');
     const body = clear($('#exportBody'));
     body.appendChild(el('div', { class: 'loading', text: '正在试算导出结果…' }));
@@ -142,7 +143,8 @@ const ExportFlow = {
       $('#btnExportConfirm').disabled = true;
       return;
     }
-    if (!this.fileName) this.fileName = result.defaultFileName || `号源排班-${App.ym}.xlsx`;
+    // 默认文件名：坐诊科室名称-年月（后端按科室设置生成）
+    if (!this.fileName) this.fileName = result.defaultFileName || `排班表-${App.ym}.xlsx`;
     $('#btnExportConfirm').disabled = false;
     body.appendChild(this.destBlock());
     body.appendChild(this.infoBlock(result));
@@ -275,7 +277,7 @@ const ExportFlow = {
       await RoomsView.flushPending();
       await SettingsView.flushPending();
       await App.saveNow(true);
-      const name = (this.fileName || '').trim() || `号源排班-${App.ym}.xlsx`;
+      const name = (this.fileName || '').trim() || `排班表-${App.ym}.xlsx`;
       const outFile = this.dir ? `${this.dir.replace(/[\\/]+$/, '')}\\${name}` : '';
       const result = await call(window.api.exportMonth, App.ym, { outDir: this.dir, outFile });
       Modals.close('modalExport');
@@ -335,16 +337,21 @@ const Help = {
       );
     };
     sec('三步走', [
-      '在「医生资料」里填好每位医生的 <b>姓名 / 门诊编号 / 号别名称 / 默认诊室</b>，改完自动保存。',
+      '在「医生资料」里填好每位医生的 <b>姓名 / 门诊编号 / 号别名称 / 默认诊室</b>，改完自动保存。'
+      + '号别名称里以前叫「医师」的，现在统一叫 <b>住院医师</b>（老的资料会自动改过来）。',
       '「诊室设置」「科室设置」也一样，填完就存，不用找保存按钮。',
-      '回到「排班表」，在<b>下面一排</b>点一位医生选中，再点格子或按住鼠标拖动，就能连续排班；排完点右上角 <b>导出排班表</b>。',
+      '回到「排班表」，在<b>下面一排</b>点一位医生选中，再点格子或按住鼠标拖动，就能连续排班；排完点右上角 <b>导出排班表</b>，'
+      + '默认存到<b>桌面</b>，文件名默认是 <b>坐诊科室名称-年月</b>（如 心血管内科-2026-10）。',
     ]);
     sec('排班表怎么点', [
       '<b>选中医生</b>：在排班表下面一排的「排班医生」里点名字，顶部会显示当前画笔。',
       '<b>排一格</b>：点空格子即填入当前医生。',
       '<b>连续排</b>：按住鼠标左键拖动，划过的格子都会排上。',
       '<b>取消</b>：对同一个医生连点，会把该格清空（相当于橡皮擦）。',
-      '<b>右键菜单</b>：清空单格、清空整行、清空整列、整行都排同一位医生。',
+      '<b>清空画笔</b>：选人条最右边有个「清空」。选它之后，<b>左键</b>点格子就是清空该格，'
+      + '<b>右键</b>点格子可以撤回对这一格的清空（把刚才清掉的医生放回去）。',
+      '<b>右键菜单</b>：清空单格、清空整列、整列都换成当前医生、自定义这一格的时间、把该格医生当画笔。',
+      '<b>整列都换成某医生</b>：先在下面点中他，再到任意格子右键 →「整列都换成 XXX」，该诊室整个月都排他。',
       '<b>仅选择模式</b>：只想看看某个格子，不想误改时切到「仅选择」。',
     ]);
     sec('快捷键', [
@@ -394,12 +401,14 @@ const Help = {
       ['班次结束时间', '日期 + 结束时间（可按医生/格子单独设）', '2026-10-23 12:00:00'],
       ['机构名称', '科室设置', '（可留空）'],
       ['坐诊科室名称', '科室设置', '（自己填）'],
+      ['业务科室名称', '科室设置', '（自己填）'],
       ['坐诊医生编码', '医生资料 · 门诊编号', 'doctor001'],
-      ['号别名称', '医生资料 · 号别名称', '医师'],
+      ['号别名称', '医生资料 · 号别名称', '住院医师'],
       ['诊室名称', '诊室设置 · 诊室名称', '门诊诊室1'],
       ['分诊台名称', '科室设置', '（自己填）'],
       ['每个时间间隔号数', '科室设置默认，可按医生/格子单独设', '1'],
       ['时间间隔（分钟）', '科室设置默认，可按医生/格子单独设', '8'],
+      ['现场号数', '科室设置（整张表一个值）', '0'],
     ];
     for (const [a, b, c] of rows) {
       map.appendChild(el('tr', null, [el('td', { text: a }), el('td', { text: b }), el('td', { class: 'sample', text: c })]));

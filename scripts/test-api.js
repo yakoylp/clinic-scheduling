@@ -48,12 +48,13 @@ process.on('exit', () => {
 console.log('== 状态快照 ==');
 const snap = handlers.snapshot();
 checkTrue('快照能读出来', !!snap, JSON.stringify(snap.months));
-check('导出列定义 12 列', snap.exportColumns.length, 12);
+check('导出列定义 14 列', snap.exportColumns.length, 14);
 checkTrue(
-  '最后两列是号数和间隔',
-  snap.exportColumns.slice(10).join('|') === '每个时间间隔号数|时间间隔（分钟）',
-  snap.exportColumns.slice(10).join('|')
+  '最后三列是号数/间隔/现场号数',
+  snap.exportColumns.slice(11).join('|') === '每个时间间隔号数|时间间隔（分钟）|现场号数',
+  snap.exportColumns.slice(11).join('|')
 );
+check('第 7 列是业务科室名称', snap.exportColumns[6], '业务科室名称');
 
 // 先导一份示例数据进来，后面的用例都有东西可测
 const fixture = sample.buildSampleWorkbook();
@@ -201,7 +202,7 @@ console.log('== 导出：科室设置为空时对应列留空 ==');
   checkTrue('科室设置为空时试算仍有行', built.rowCount > 0, `${built.rowCount} 行`);
   check('坐诊科室名称为空', built.rows[0].deptName, '');
   check('分诊台名称为空', built.rows[0].triageDesk, '');
-  check('试算返回默认文件名', built.defaultFileName, `号源排班-${fixture.ym}.xlsx`);
+  check('试算返回默认文件名', built.defaultFileName, `排班表-${fixture.ym}.xlsx`);
   schedule0.settings = savedSettings;
   store.saveSchedule(schedule0);
 }

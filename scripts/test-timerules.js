@@ -330,8 +330,8 @@ console.log('== 7. handlers 存 / 清格子时间，并且导出用得上 ==');
       const defRow = exporter
         .buildRows({ doctors: handlers.snapshot().doctors }, store.loadSchedule(), M, {})
         .rows.find((r) => r.date === target && r.shift === '上午');
-      check('科室默认号数进导出', defRow.cells[10], String(store.DEFAULT_PER_INTERVAL));
-      check('科室默认间隔进导出', defRow.cells[11], String(store.DEFAULT_INTERVAL_MINUTES));
+      check('科室默认号数进导出', defRow.cells[11], String(store.DEFAULT_PER_INTERVAL));
+      check('科室默认间隔进导出', defRow.cells[12], String(store.DEFAULT_INTERVAL_MINUTES));
 
       // 医生级：只改这个班次的间隔
       const docs = handlers.saveDoctors(
@@ -342,16 +342,16 @@ console.log('== 7. handlers 存 / 清格子时间，并且导出用得上 ==');
       const docRow = exporter
         .buildRows({ doctors: docs }, store.loadSchedule(), M, {})
         .rows.find((r) => r.date === target && r.shift === '上午');
-      check('医生规律的间隔进导出', docRow.cells[11], '6');
-      check('医生规律没动号数（回落到班次默认）', docRow.cells[10], String(store.DEFAULT_PER_INTERVAL));
+      check('医生规律的间隔进导出', docRow.cells[12], '6');
+      check('医生规律没动号数（回落到班次默认）', docRow.cells[11], String(store.DEFAULT_PER_INTERVAL));
 
       // 格子级：只改号数，间隔仍来自医生规律
       handlers.setSlotTime(M, target, '上午', rooms[0].id, { start: '09:15:00', end: '11:45:00', perInterval: 3 });
       const cellRow = exporter
         .buildRows({ doctors: handlers.snapshot().doctors }, store.loadSchedule(), M, {})
         .rows.find((r) => r.date === target && r.shift === '上午');
-      check('格子号数进导出', cellRow.cells[10], '3');
-      check('格子没改间隔时沿用医生规律', cellRow.cells[11], '6');
+      check('格子号数进导出', cellRow.cells[11], '3');
+      check('格子没改间隔时沿用医生规律', cellRow.cells[12], '6');
       check('格子的开始时间还在', cellRow.cells[2], `${target} 09:15:00`);
 
       // 科室设置里把默认间隔改成 12，所有人都跟着变
@@ -367,13 +367,13 @@ console.log('== 7. handlers 存 / 清格子时间，并且导出用得上 ==');
       const shifted = exporter
         .buildRows({ doctors: handlers.snapshot().doctors }, store.loadSchedule(), M, {})
         .rows.find((r) => r.date === target && r.shift === '上午');
-      check('改了科室默认后：格子级号数仍优先', shifted.cells[10], '3');
-      check('改了科室默认后：医生间隔仍优先', shifted.cells[11], '6');
+      check('改了科室默认后：格子级号数仍优先', shifted.cells[11], '3');
+      check('改了科室默认后：医生间隔仍优先', shifted.cells[12], '6');
       const otherDay = exporter
         .buildRows({ doctors: handlers.snapshot().doctors }, store.loadSchedule(), M, {})
         .rows.find((r) => r.date !== target && r.shift === '上午');
       if (otherDay) {
-        check('其他没设过的格子跟着科室默认走', otherDay.cells[11], '12');
+        check('其他没设过的格子跟着科室默认走', otherDay.cells[12], '12');
       }
       void key;
     }

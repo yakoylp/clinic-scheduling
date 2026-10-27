@@ -58,7 +58,7 @@
         <div class="tool-group grow">
           <label class="lbl">当前医生</label>
           <div class="brush-bar" id="brushBar">
-            <span class="brush-empty" id="brushEmpty">从下面点一位医生，再点格子或拖动即可排班</span>
+            <span class="brush-empty" id="brushEmpty">从下面点一位医生，再点格子或拖动即可排班；点「清空」则可左键清格子、右键撤回</span>
           </div>
         </div>
 
@@ -188,8 +188,14 @@
           <label>坐诊科室名称
             <input class="input" id="setDeptName" placeholder="如 心血管内科、呼吸内科" />
           </label>
+          <label>业务科室名称
+            <input class="input" id="setBusinessDeptName" placeholder="如 心血管内科门诊（导出表「业务科室名称」列）" />
+          </label>
           <label>分诊台名称
             <input class="input" id="setTriageDesk" placeholder="如 门诊分诊台、内科分诊台" />
+          </label>
+          <label>现场号数
+            <input class="input" id="setOnsiteCount" type="number" min="0" step="1" placeholder="如 0（导出表「现场号数」列）" />
           </label>
         </div>
 
@@ -299,11 +305,10 @@
   </div>
 
   <datalist id="titleOptions">
-    <option value="医师"></option>
+    <option value="住院医师"></option>
     <option value="主治医师"></option>
     <option value="副主任医师"></option>
     <option value="主任医师"></option>
-    <option value="专科医师"></option>
     <option value="护师"></option>
   </datalist>
 

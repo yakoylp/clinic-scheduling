@@ -62,6 +62,15 @@ const applied = legacy.applyLegacyDoctors(roster, schedule.rooms, parsed);
 store.saveDoctors(applied.roster);
 const monthResult = legacy.applyLegacyMonth(schedule, applied.roster, parsed, applied.col2room);
 store.saveSchedule(schedule);
+
+// 号别名称迁移：把一位医生的号别写成旧叫法「医师」，保存后应自动变成「住院医师」
+applied.roster.doctors[0].title = '医师';
+store.saveDoctors(applied.roster);
+const rosterMigrated = store.loadDoctors();
+check('旧叫法「医师」自动迁移成「住院医师」', rosterMigrated.doctors[0].title, '住院医师');
+check('迁移后不再有「医师」', rosterMigrated.doctors.filter((d) => d.title === '医师').length, 0);
+// 后续导出用迁移后的医生字典，和真实运行路径一致
+applied.roster.doctors = rosterMigrated.doctors;
 check('诊室数', schedule.rooms.length, fixture.rooms.length);
 check('出厂不预设医生，导入后正好是认出来的人数', applied.roster.doctors.length, fixture.expectedDoctors);
 checkTrue(
@@ -72,8 +81,7 @@ checkTrue(
 applied.roster.doctors.forEach((d) => console.log(`    ${d.name}  编码=${d.code || '(空)'}  号别=${d.title || '(空)'}  诊室=${d.room}`));
 
 console.log('== 3. 统计 ==');
-const stats = store.computeStats(applied.roster.doctors, monthResult.month, schedule.rooms);
-console.log('  医生班次：', stats.doctors.map((d) => `${d.name}=${d.total}`).join(' '));
+const stats = store.computeStats(applied.roster.doctors, monthResult.month, schedule.rooms);console.log('  医生班次：', stats.doctors.map((d) => `${d.name}=${d.total}`).join(' '));
 console.log('  诊室占用：', stats.rooms.map((r) => `${r.short}=${r.filled}`).join(' '));
 check('已排格数 = 样例里填了人的格数', stats.filled, fixture.assignmentCount);
 checkTrue('每个格子最多一位医生', stats.filled === stats.doctors.reduce((a, b) => a + b.total, 0));
@@ -95,7 +103,8 @@ check('第一行日期', built.rows[0].cells[0], `${fixture.ym}-01`);
 check('第一行班次', built.rows[0].cells[1], '上午');
 check('第一行开始时间', built.rows[0].cells[2], `${fixture.ym}-01 08:00:00`);
 check('科室名', built.rows[0].cells[5], fixture.department);
-check('分诊台名', built.rows[0].cells[9], '示例分诊台');
+check('业务科室名称留空（科室设置里没填）', built.rows[0].cells[6], '');
+check('分诊台名', built.rows[0].cells[10], '示例分诊台');
 check('机构名称留空', built.rows[0].cells[4], '');
 checkTrue('日期是升序的', built.rows.every((r, i, arr) => i === 0 || arr[i - 1].date <= r.date));
 
@@ -112,27 +121,58 @@ console.log('  sheet：', back.SheetNames);
 const backWs = back.Sheets[back.SheetNames[0]];
 const aoa = XLSX.utils.sheet_to_json(backWs, { header: 1, raw: false, defval: '' });
 console.log('  表头：', JSON.stringify(aoa[0]));
-check('表头列数', aoa[0].length, 12);
-check('表头前 10 列不变', aoa[0].slice(0, 10).join('|'), '号源日期|班次|班次开始时间|班次结束时间|机构名称|坐诊科室名称|坐诊医生编码|号别名称|诊室名称|分诊台名称');
-check('新增第 11 列', aoa[0][10], '每个时间间隔号数');
-check('新增第 12 列', aoa[0][11], '时间间隔（分钟）');
+check('表头列数', aoa[0].length, 14);
+check(
+  '表头 14 列与新模板一致',
+  aoa[0].join('|'),
+  '号源日期|班次|班次开始时间|班次结束时间|机构名称|坐诊科室名称|业务科室名称|坐诊医生编码|号别名称|诊室名称|分诊台名称|每个时间间隔号数|时间间隔（分钟）|现场号数'
+);
 check('数据行数', aoa.length - 1, result.rowCount);
 console.log('  第 2 行：', JSON.stringify(aoa[1]));
 checkTrue('日期是文本而非序列号', /^\d{4}-\d{2}-\d{2}$/.test(aoa[1][0]), aoa[1][0]);
 check('开始时间是文本', aoa[1][2], `${aoa[1][0]} 08:00:00`);
 checkTrue('日期全部是 YYYY-MM-DD 文本', aoa.slice(1).every((r) => /^\d{4}-\d{2}-\d{2}$/.test(r[0])));
-checkTrue('诊室名都在诊室设置里', aoa.slice(1).every((r) => schedule.rooms.some((x) => x.name === r[8])));
+checkTrue('诊室名都在诊室设置里', aoa.slice(1).every((r) => schedule.rooms.some((x) => x.name === r[9])));
 checkTrue('导出的格子数 = 已排数', aoa.length - 1 === fixture.assignmentCount);
-// 两个新列：默认值 1 / 8，且必须是文本
+// 各项默认值：号数 1 / 间隔 8 / 现场号数 0，且必须是文本
 checkTrue(
   '每行都写了「每个时间间隔号数」',
-  aoa.slice(1).every((r) => r[10] === String(store.DEFAULT_PER_INTERVAL)),
-  aoa[1] && aoa[1][10]
+  aoa.slice(1).every((r) => r[11] === String(store.DEFAULT_PER_INTERVAL)),
+  aoa[1] && aoa[1][11]
 );
 checkTrue(
   '每行都写了「时间间隔（分钟）」',
-  aoa.slice(1).every((r) => r[11] === String(store.DEFAULT_INTERVAL_MINUTES)),
-  aoa[1] && aoa[1][11]
+  aoa.slice(1).every((r) => r[12] === String(store.DEFAULT_INTERVAL_MINUTES)),
+  aoa[1] && aoa[1][12]
+);
+checkTrue('每行都写了「现场号数」0', aoa.slice(1).every((r) => r[13] === '0'), aoa[1] && aoa[1][13]);
+// 业务科室名称：科室设置里填了才写，没填就是空
+check(
+  '业务科室名称取自科室设置',
+  aoa[1][6],
+  schedule.settings.businessDeptName || ''
+);
+// 号别名称：样例数据里的「医师」应被规范成「住院医师」
+{
+  const titles = new Set(aoa.slice(1).map((r) => r[8]));
+  checkTrue('号别名称里没有旧叫法「医师」', !titles.has('医师'), [...titles].join('/'));
+  checkTrue('号别名称已规范成「住院医师」', titles.has('住院医师'), [...titles].join('/'));
+}
+// 默认文件名：坐诊科室名称-年月（试算模式才返回；正式导出用同一个生成函数）
+check(
+  '默认文件名是「坐诊科室名称-年月」',
+  exporter.defaultExportName(schedule, fixture.ym),
+  `${schedule.settings.deptName}-${fixture.ym}`
+);
+check(
+  '科室名称为空时退回「排班表-年月」',
+  exporter.defaultExportName({ settings: { deptName: '' } }, fixture.ym),
+  `排班表-${fixture.ym}`
+);
+check(
+  '科室名称里的逗号会换成下划线（文件名不能带）',
+  exporter.defaultExportName({ settings: { deptName: '内科门诊,呼吸门诊' } }, fixture.ym),
+  `内科门诊_呼吸门诊-${fixture.ym}`
 );
 
 console.log('== 7. 样式保真（和模板逐格对比） ==');

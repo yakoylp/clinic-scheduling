@@ -176,7 +176,18 @@ const ScheduleView = {
       const current = App.slot(info.date, info.shift, info.roomId);
       const brush = App.brushId;
 
-      if (App.mode !== 'paint' || !brush) {
+      if (App.mode !== 'paint') {
+        App.setSelected(info);
+        return;
+      }
+      // 「清空」画笔：左键就是清空这一格
+      if (App.brushClear) {
+        event.preventDefault();
+        self._drag = { paintId: null, touched: new Set(), changed: false, recordClear: true };
+        self.paintCell(cell, null);
+        return;
+      }
+      if (!brush) {
         App.setSelected(info);
         return;
       }
@@ -199,6 +210,11 @@ const ScheduleView = {
       event.preventDefault();
       const info = self.cellInfo(cell);
       if (!info) return;
+      // 「清空」画笔下右键 = 撤回对该格的清空（恢复被清掉的那位医生）
+      if (App.mode === 'paint' && App.brushClear) {
+        self.restoreCleared(cell, info);
+        return;
+      }
       App.setSelected(info);
       self.showContextMenu(event.clientX, event.clientY, info, cell);
     };
@@ -223,9 +239,40 @@ const ScheduleView = {
     const key = App.slotKey(info.date, info.shift, info.roomId);
     if (drag && drag.touched.has(key)) return;
     if (drag) drag.touched.add(key);
+    const before = App.slot(info.date, info.shift, info.roomId);
+    // 用「清空」画笔清掉一格时，记住原来是谁，右键可以撤回
+    const isClearing = drag ? !!drag.recordClear : App.brushClear;
+    if (isClearing && !doctorId && before) this.rememberCleared(key, before);
     App.applyChanges([{ date: info.date, shift: info.shift, roomId: info.roomId, doctorId }]);
     this.fillCell(cell, doctorId ? App.doctor(doctorId) : null, describeDate(info.date), info);
     this.updateHeaderAndSide();
+  },
+
+  /** 记住某格被清空前是谁（同格反复清空只保留最早那次，便于一次撤回） */
+  rememberCleared(key, doctorId) {
+    if (!this._cleared) this._cleared = new Map();
+    if (!this._cleared.has(key)) this._cleared.set(key, doctorId);
+  },
+
+  /** 撤回对该格的清空：把被清掉的医生放回去 */
+  restoreCleared(cell, info) {
+    const key = App.slotKey(info.date, info.shift, info.roomId);
+    const prev = this._cleared && this._cleared.get(key);
+    if (!prev) {
+      toast('这一格没有可撤回的清空操作', 'ok');
+      return;
+    }
+    const doc = App.doctor(prev);
+    if (!doc) {
+      this._cleared.delete(key);
+      toast('原来那位医生已被删除，没法撤回', 'err');
+      return;
+    }
+    this._cleared.delete(key);
+    App.applyChanges([{ date: info.date, shift: info.shift, roomId: info.roomId, doctorId: prev }]);
+    this.fillCell(cell, doc, describeDate(info.date), info);
+    this.updateHeaderAndSide();
+    toast(`已撤回，${doc.name} 回到这一格`, 'ok');
   },
 
   endDrag() {
@@ -285,6 +332,14 @@ const ScheduleView = {
     }, !doc);
     add(`清空「${room ? room.short || room.name : ''}」整列`, () => this.clearScope({ roomId: info.roomId }));
 
+    // 选中了医生画笔时，可以一键把这一整列（该诊室整个月）都换成他
+    if (App.brushId) {
+      const brush = App.doctor(App.brushId);
+      if (brush) {
+        add(`整列都换成 ${brush.name}`, () => this.fillColumn(info.roomId, brush.id));
+      }
+    }
+
     // 单格出诊时间：优先级高于医生规律和班次默认
     const slotKey = App.slotKey(info.date, info.shift, info.roomId);
     const cellRule = (App.slotRules() || {})[slotKey];
@@ -308,7 +363,9 @@ const ScheduleView = {
     }
     if (doc) {
       add(`用 ${doc.name} 当画笔`, () => {
+        // 这里要「确定选中」，不能用 setBrush（它带 toggle 语义，再点一次会取消）
         App.brushId = doc.id;
+        App.brushClear = false;
         App.setMode('paint');
         App.emit({ type: 'brush' });
       });
@@ -334,6 +391,26 @@ const ScheduleView = {
     App.applyChanges(changes);
     this.render();
     toast(`已清空 ${changes.length} 格`, 'ok');
+  },
+
+  /** 把某个诊室整列（该诊室整个月的所有日期与班次）都排成这位医生 */
+  fillColumn(roomId, doctorId) {
+    const doc = App.doctor(doctorId);
+    if (!doc) return;
+    const changes = [];
+    for (const [key, docId] of Object.entries(App.month.slots)) {
+      const [date, shift, rid] = key.split('|');
+      if (rid !== roomId) continue;
+      if (docId === doctorId) continue;
+      changes.push({ date, shift, roomId: rid, doctorId });
+    }
+    if (!changes.length) {
+      toast(`这一列已经全是 ${doc.name} 了`, 'ok');
+      return;
+    }
+    App.applyChanges(changes);
+    this.render();
+    toast(`「${(App.room(roomId) || {}).short || '该诊室'}」整列已换成 ${doc.name}（${changes.length} 格）`, 'ok');
   },
 
   renderSide() {
@@ -437,6 +514,23 @@ const ScheduleView = {
       };
       wrap.appendChild(chip);
     }
+    // 清空画笔：左键清空格子，右键撤回该格的清空
+    const clearChip = el(
+      'button',
+      {
+        class: `doc-chip doc-chip-clear${App.brushClear ? ' active' : ''}`,
+        title: '清空画笔：左键点格子就是清空该格；右键点格子可以撤回对该格的清空',
+      },
+      [
+        el('span', { class: 'doc-dot doc-dot-clear' }),
+        el('span', { class: 'doc-chip-name', text: '清空' }),
+      ]
+    );
+    clearChip.onclick = () => {
+      App.setClearBrush();
+      if (App.mode !== 'paint') App.setMode('paint');
+    };
+    wrap.appendChild(clearChip);
   },
 
   renderBrush() {
@@ -444,6 +538,24 @@ const ScheduleView = {
     const empty = $('#brushEmpty');
     const existing = bar.querySelector('.brush-chip');
     if (existing) existing.remove();
+    if (App.brushClear) {
+      if (empty) empty.hidden = true;
+      bar.appendChild(
+        el('span', { class: 'brush-chip brush-chip-clear' }, [
+          el('span', { class: 'brush-dot brush-dot-clear' }),
+          el('span', { text: '清空' }),
+          el('span', { class: 'brush-meta', text: '左键清空格子 · 右键撤回该格' }),
+          el('button', {
+            class: 'btn btn-sm btn-ghost',
+            text: '取消',
+            onclick: () => {
+              App.setClearBrush(false);
+            },
+          }),
+        ])
+      );
+      return;
+    }
     if (!App.brushId) {
       if (empty) empty.hidden = false;
       return;
@@ -461,6 +573,7 @@ const ScheduleView = {
           text: '取消',
           onclick: () => {
             App.brushId = null;
+            App.brushClear = false;
             App.emit({ type: 'brush' });
           },
         }),

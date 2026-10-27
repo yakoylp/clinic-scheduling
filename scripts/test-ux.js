@@ -164,7 +164,17 @@ function makeApi(snapshot, hooks) {
       },
     },
     legacy: { pick: () => ok(null), preview: () => ok(null), apply: () => ok({}) },
-    exportMonth: () => ok({ dryRun: true, rowCount: 0, dayCount: 0, problems: [], templateUsed: true, rows: [] }),
+    exportMonth: (ym) =>
+      ok({
+        dryRun: true,
+        rowCount: 0,
+        dayCount: 0,
+        problems: [],
+        templateUsed: true,
+        rows: [],
+        // 和真实后端一致：默认文件名 = 坐诊科室名称-年月
+        defaultFileName: `${(snapshot.settings && snapshot.settings.deptName) || '排班表'}-${ym}.xlsx`,
+      }),
     reveal: () => ok(true),
     openFile: () => ok(true),
     openFolder: () => ok(true),
@@ -226,7 +236,15 @@ function snapshotFromData(overrides) {
     shifts: schedule.shifts,
     months,
     filledMonths: months.filter((ym) => Object.values(schedule.months[ym].slots || {}).some(Boolean)),
-    paths: { root: 'X', packaged: false, data: 'X', exportDir: 'X', template: 'X', templateExists: true },
+    paths: {
+      root: 'X',
+      packaged: false,
+      data: 'X',
+      exportDir: 'X',
+      desktop: '/desktop',
+      template: 'X',
+      templateExists: true,
+    },
     exportColumns: store.EXPORT_COLUMNS,
   };
   return Object.assign(base, overrides || {});
@@ -687,6 +705,111 @@ function snapshotFromData(overrides) {
     await new Promise((r) => setTimeout(r, 50));
   }
 
+  console.log('== 清空画笔：左键清空、右键撤回 ==');
+  {
+    const snapshot = snapshotFromData({});
+    const doctor = snapshot.doctors[0];
+    const w = await boot(snapshot);
+    const doc = w.document;
+    const App = w.__app.App;
+    const SV = w.__app.ScheduleView;
+    const fire = (target, type, extra) =>
+      target.dispatchEvent(new w.MouseEvent(type, Object.assign({ bubbles: true, cancelable: true }, extra)));
+
+    const day = App.days[0];
+    const morning = App.shifts[0];
+    const room = App.rooms[0];
+    const key = App.slotKey(day.date, morning.name, room.id);
+    const cellOf = () =>
+      doc.querySelector(`.gc-cell[data-date="${day.date}"][data-shift="${morning.name}"][data-room="${room.id}"]`);
+
+    // 先排上这位医生
+    SV.paintCell(cellOf(), doctor.id);
+    check('先排上一位医生', App.slot(day.date, morning.name, room.id), doctor.id);
+
+    // 「清空」画笔在选人条里
+    const clearChip = doc.querySelector('#palette .doc-chip-clear');
+    checkTrue('选人条里有「清空」', !!clearChip, clearChip ? clearChip.textContent : '(无)');
+    clearChip.click();
+    checkTrue('点了之后进入清空模式', App.brushClear === true);
+    checkTrue('清空模式下没有具体医生画笔', App.brushId === null);
+    checkTrue('清空画笔处于选中态', doc.querySelector('#palette .doc-chip-clear').classList.contains('active'));
+    checkTrue('顶部显示「清空」画笔与本格提示', doc.querySelector('#brushBar').textContent.includes('右键撤回'));
+
+    // 左键 = 清空该格
+    fire(cellOf(), 'mousedown', { button: 0, buttons: 1 });
+    w.document.dispatchEvent(new w.MouseEvent('mouseup', { bubbles: true }));
+    check('左键清空了这一格', App.slot(day.date, morning.name, room.id), null);
+    checkTrue('格子显示为空', cellOf().classList.contains('empty'));
+
+    // 右键 = 撤回对该格的清空
+    fire(cellOf(), 'contextmenu', { button: 2, buttons: 2 });
+    check('右键把医生撤回来了', App.slot(day.date, morning.name, room.id), doctor.id);
+    checkTrue('格子又显示这位医生', !cellOf().classList.contains('empty'));
+
+    // 再右键一次没有可撤回的，不会报错也不会改数据
+    fire(cellOf(), 'contextmenu', { button: 2, buttons: 2 });
+    check('没有可撤回时数据保持不变', App.slot(day.date, morning.name, room.id), doctor.id);
+
+    // 清空模式下右键不弹右键菜单
+    const leftOver = doc.querySelector('#ctxMenu');
+    check('清空模式下右键不弹菜单', leftOver, null);
+    void key;
+  }
+
+  console.log('== 右键「整列都换成该医生」 ==');
+  {
+    const snapshot = snapshotFromData({});
+    const doctor = snapshot.doctors[1] || snapshot.doctors[0];
+    const w = await boot(snapshot);
+    const doc = w.document;
+    const App = w.__app.App;
+    const SV = w.__app.ScheduleView;
+
+    // 选中这位医生当画笔
+    App.setBrush(doctor.id);
+    const day = App.days[0];
+    const morning = App.shifts[0];
+    const room = App.rooms[0];
+    const cell = doc.querySelector(
+      `.gc-cell[data-date="${day.date}"][data-shift="${morning.name}"][data-room="${room.id}"]`
+    );
+    SV.showContextMenu(100, 100, SV.cellInfo(cell), cell);
+    const menu = doc.querySelector('#ctxMenu');
+    checkTrue('右键菜单里有「整列都换成」', menu.textContent.includes(`整列都换成 ${doctor.name}`), menu.textContent);
+    const item = [...menu.querySelectorAll('.ctx-item')].find((b) => b.textContent.includes('整列都换成'));
+    item.click();
+    await new Promise((r) => setTimeout(r, 100));
+
+    const columnKeys = Object.keys(App.month.slots).filter((k) => k.endsWith(`|${room.id}`));
+    checkTrue('这一列所有格都换成了该医生', columnKeys.every((k) => App.month.slots[k] === doctor.id), `${columnKeys.length} 格`);
+    checkTrue('这一列至少排了 20 格', columnKeys.length > 20, `${columnKeys.length} 格`);
+  }
+
+  console.log('== 号别名称选项 ==');
+  {
+    const w = await boot(snapshotFromData({}));
+    const doc = w.document;
+    const values = [...doc.querySelectorAll('#titleOptions option')].map((o) => o.value);
+    checkTrue('有「住院医师」', values.includes('住院医师'), values.join('/'));
+    checkTrue('不再有旧叫法「医师」', !values.includes('医师'), values.join('/'));
+    checkTrue('「专科医师」已删除', !values.includes('专科医师'), values.join('/'));
+  }
+
+  console.log('== 导出弹窗：默认桌面 + 科室-年月 ==');
+  {
+    const snapshot = snapshotFromData({});
+    const w = await boot(snapshot);
+    const App = w.__app.App;
+    await w.__app.ExportFlow.open();
+    await new Promise((r) => setTimeout(r, 200));
+    const EF = w.__app.ExportFlow;
+    check('默认导出目录是桌面', EF.dir, '/desktop');
+    const dept = snapshot.settings.deptName;
+    check('默认文件名是 科室-年月', EF.fileName, `${dept}-${App.ym}.xlsx`);
+    w.__app.Modals.closeAll();
+  }
+
   console.log('== 诊室 / 科室设置：改动即自动保存并刷新 ==');
   {
     const snapshot = snapshotFromData({});
@@ -747,6 +870,21 @@ function snapshotFromData(overrides) {
     check('设置页提示已保存', doc.querySelector('#settingsSaveHint').textContent, '已自动保存');
     check('内存里的科室名已更新', App.snapshot.settings.deptName, '示例内科');
     checkTrue('输入框仍是新值', doc.querySelector('#setDeptName').value === '示例内科', doc.querySelector('#setDeptName').value);
+
+    // 新增两个字段：业务科室名称、现场号数
+    checkTrue('科室页有「业务科室名称」输入框', !!doc.querySelector('#setBusinessDeptName'));
+    checkTrue('科室页有「现场号数」输入框', !!doc.querySelector('#setOnsiteCount'));
+    const biz = doc.querySelector('#setBusinessDeptName');
+    biz.value = '示例业务科室';
+    biz.dispatchEvent(new w.Event('input', { bubbles: true }));
+    const onsite = doc.querySelector('#setOnsiteCount');
+    onsite.value = '3';
+    onsite.dispatchEvent(new w.Event('input', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 1200));
+    check('业务科室名称已保存', App.snapshot.settings.businessDeptName, '示例业务科室');
+    check('现场号数已保存', App.snapshot.settings.onsiteCount, 3);
+    checkTrue('保存后输入框仍是新值', doc.querySelector('#setBusinessDeptName').value === '示例业务科室');
+    check('现场号数输入框是新值', doc.querySelector('#setOnsiteCount').value, '3');
   }
 
   console.log('== 医生资料页可滚动 ==');

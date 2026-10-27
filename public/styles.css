@@ -136,6 +136,17 @@ main { flex: 1 1 auto; min-height: 0; position: relative; }
 }
 .doc-chip-name { max-width: 6.5em; overflow: hidden; text-overflow: ellipsis; }
 .doc-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+/* 「清空」画笔：和医生区分开，选中时用灰蓝底色 */
+.doc-chip-clear { border-style: dashed; color: #475569; }
+.doc-chip-clear.active {
+  border-style: solid; border-color: #64748b; background: #eef1f6; color: #1e293b;
+  box-shadow: 0 0 0 2px rgba(100, 116, 139, .18);
+}
+.doc-dot-clear, .brush-dot-clear {
+  background: repeating-linear-gradient(45deg, #cbd5e1 0 3px, #f1f5f9 3px 6px);
+  border: 1px solid #94a3b8;
+}
+.brush-chip-clear { background: #eef1f6; border-color: #c4ccd8; }
 .brush-chip {
   display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px 4px 6px;
   border-radius: 999px; background: #eef3ff; border: 1px solid #c7d7fb; font-weight: 600;
