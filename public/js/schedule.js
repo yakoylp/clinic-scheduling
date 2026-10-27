@@ -63,8 +63,9 @@ const ScheduleView = {
 
       shifts.forEach((shift, si) => {
         const time = (App.month.shiftTimes || {})[`${day.date}|${shift.name}`] || {};
+        // "2026-10-01 08:00:00" -> "08:00"；起止都从第 11 位开始取，别用 16（那是冒号后的位置）
         const start = time.start ? time.start.slice(11, 16) : '';
-        const end = time.end ? time.end.slice(16, 21) : '';
+        const end = time.end ? time.end.slice(11, 16) : '';
         body.appendChild(
           el('div', { class: `gc gc-shift${si === 0 ? ' gc-first' : ''}` }, [
             el('div', { class: 'shift-name', text: shift.name }),

@@ -95,6 +95,10 @@ const fakeApi = {
   settings: { save: (s) => ok({ settings: s, shifts: scheduleData.shifts }) },
   legacy: { pick: () => ok(null), preview: () => ok(null), apply: () => ok({}) },
   exportMonth: () => ok({ dryRun: true, rowCount: 0, dayCount: 0, problems: [], templateUsed: true, rows: [] }),
+  copyImage: (dataUrl) => {
+    window.__lastCopiedImage = dataUrl;
+    return ok({ width: 100, height: 200 });
+  },
   reveal: () => ok(true),
   openFile: () => ok(true),
   openFolder: () => ok(true),
@@ -121,11 +125,11 @@ window.HTMLElement.prototype.scrollIntoView = () => {};
  * 而 jsdom 的 window.eval 每次都是独立作用域，直接 eval 会报 $ is not defined。
  * 把 7 个脚本拼进同一个函数体再整体跑一遍，就还原了浏览器的行为。
  */
-const scripts = ['util.js', 'state.js', 'schedule.js', 'doctors.js', 'timerules.js', 'settings.js', 'modals.js', 'app.js'];
+const scripts = ['util.js', 'state.js', 'schedule.js', 'doctors.js', 'timerules.js', 'settings.js', 'modals.js', 'copyview.js', 'app.js'];
 const sources = scripts.map((name) => fs.readFileSync(path.join(ROOT, 'public', 'js', name), 'utf8'));
 const epilogue = `
 window.__app = { App, ScheduleView, DoctorsView, RoomsView, SettingsView, Help, Modals,
-  ImportFlow, ExportFlow, switchTab, gotoMonth, stepMonth, updateStatus, describeDate, el, toast };
+  ImportFlow, ExportFlow, switchTab, gotoMonth, stepMonth, updateStatus, describeDate, el, toast, CopyView };
 `;
 const bundle = `(function (window) {\n${sources.join('\n;\n')}\n${epilogue}\n})(window);`;
 try {

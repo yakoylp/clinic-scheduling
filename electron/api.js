@@ -79,8 +79,38 @@ async function openFolder(dir) {
   return true;
 }
 
+/**
+ * 把界面画好的排班视图长图写进系统剪贴板。
+ * 界面传过来的是 PNG 的 dataURL（比传二进制更省事，也不受 IPC 序列化差异影响）。
+ */
+async function copyImageToClipboard(dataUrl) {
+  const { clipboard, nativeImage } = require('electron');
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+    throw new Error('图片数据格式不对');
+  }
+  const image = nativeImage.createFromDataURL(dataUrl);
+  if (image.isEmpty()) throw new Error('生成的图片是空的');
+  clipboard.writeImage(image);
+  // 冒烟测试用：把同一张图落盘，方便核对长图内容（正常使用不会触发）
+  if (process.env.DSH_CLIPBOARD_PNG) {
+    try {
+      fs.writeFileSync(process.env.DSH_CLIPBOARD_PNG, image.toPNG());
+    } catch (err) {
+      /* 落盘失败不影响复制 */
+    }
+  }
+  const back = clipboard.readImage();
+  return {
+    width: image.getSize().width,
+    height: image.getSize().height,
+    clipboardWidth: back.getSize().width,
+    clipboardHeight: back.getSize().height,
+  };
+}
+
 const CHANNELS = [
   ['app:snapshot', () => handlers.snapshot()],
+  ['clipboard:image', (dataUrl) => copyImageToClipboard(dataUrl)],
   ['month:get', (ym) => handlers.getMonth(ym)],
   ['month:patch', (ym, changes) => handlers.patchMonth(ym, changes)],
   ['month:setSlotTime', (ym, date, shift, roomId, times) => handlers.setSlotTime(ym, date, shift, roomId, times)],

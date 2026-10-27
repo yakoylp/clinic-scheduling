@@ -16,7 +16,7 @@ const store = require('../lib/store');
 
 const ROOT = path.join(__dirname, '..');
 const HTML = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');
-const SCRIPTS = ['util.js', 'state.js', 'schedule.js', 'doctors.js', 'timerules.js', 'settings.js', 'modals.js', 'app.js'];
+const SCRIPTS = ['util.js', 'state.js', 'schedule.js', 'doctors.js', 'timerules.js', 'settings.js', 'modals.js', 'copyview.js', 'app.js'];
 
 let failures = 0;
 const check = (label, actual, expected) => {
@@ -176,6 +176,11 @@ function makeApi(snapshot, hooks) {
         defaultFileName: `${(snapshot.settings && snapshot.settings.deptName) || '排班表'}-${ym}.xlsx`,
       }),
     reveal: () => ok(true),
+    copyImage: (dataUrl) => {
+      // 记下最后一次复制请求，供测试断言
+      if (hook.onCopyImage) hook.onCopyImage(dataUrl);
+      return ok({ width: 848, height: 2256 });
+    },
     openFile: () => ok(true),
     openFolder: () => ok(true),
     setDirty: () => {},
@@ -193,7 +198,7 @@ async function boot(snapshot, hooks) {
   const bundle = SCRIPTS.map((f) => fs.readFileSync(path.join(ROOT, 'public', 'js', f), 'utf8')).join('\n;\n');
   const epilogue = `
 window.__app = { App, ScheduleView, DoctorsView, RoomsView, SettingsView, Help, Modals,
-  ImportFlow, ExportFlow, switchTab, gotoMonth, updateStatus, DOCTOR_COLORS, TimeRules, CellTimeRule };
+  ImportFlow, ExportFlow, switchTab, gotoMonth, updateStatus, DOCTOR_COLORS, TimeRules, CellTimeRule, CopyView };
 `;
   window.eval(`(function (window) {\n${bundle}\n${epilogue}\n})(window);`);
   const evt = window.document.createEvent('Event');
@@ -808,6 +813,93 @@ function snapshotFromData(overrides) {
     const dept = snapshot.settings.deptName;
     check('默认文件名是 科室-年月', EF.fileName, `${dept}-${App.ym}.xlsx`);
     w.__app.Modals.closeAll();
+  }
+
+  console.log('== 复制排班视图：整月排班 + 表头画成长图进剪贴板 ==');
+  {
+    const snapshot = snapshotFromData({});
+    const doctor = snapshot.doctors[0];
+    // 周一到周五上午 8:30：用来验证格子角标也被画进去
+    doctor.timeRules = [{ days: [1, 2, 3, 4, 5], shifts: { 上午: { start: '08:30:00' } } }];
+    let copied = null;
+    const w = await boot(snapshot, {
+      onCopyImage: (url) => {
+        copied = url;
+      },
+    });
+    const doc = w.document;
+    const App = w.__app.App;
+    const CV = w.__app.CopyView;
+
+    // 按钮位置和文案
+    const copyBtn = doc.querySelector('#btnCopyView');
+    const exportBtn = doc.querySelector('#btnExport');
+    checkTrue('顶栏有「复制排班视图」按钮', !!copyBtn);
+    check('按钮文字', copyBtn && copyBtn.textContent.trim(), '复制排班视图');
+    checkTrue(
+      '按钮在「导出排班表」左边',
+      !!(copyBtn && exportBtn && (copyBtn.compareDocumentPosition(exportBtn) & 4)),
+      copyBtn && exportBtn ? `${copyBtn.id} → ${exportBtn.id}` : '(缺按钮)'
+    );
+
+    // 先排一格
+    const monday = App.days.find((d) => d.weekday === 1);
+    const morning = App.shifts[0];
+    const room = App.rooms[0];
+    App.applyChanges([{ date: monday.date, shift: morning.name, roomId: room.id, doctorId: doctor.id }]);
+
+    // 版式数据
+    const layout = CV.buildLayout();
+    check('列数 = 日期 + 星期 + 班次 + 诊室', layout.columns.length, 3 + App.rooms.length);
+    check('行数 = 天数 × 班次数', layout.bodyRows, App.days.length * App.shifts.length);
+    checkTrue('标题含科室名和年月', layout.title.includes('示例科室') && /年/.test(layout.title) && /月/.test(layout.title), layout.title);
+    check('每个班次行的格子数 = 诊室数', layout.dateBlocks[0].rows[0].cells.length, App.rooms.length);
+    checkTrue('画布宽度按列宽算', layout.width > 400, `${layout.width}px`);
+    checkTrue('画布高度按行数算（长图）', layout.height > App.days.length * 2 * 30, `${layout.height}px`);
+
+    const monBlock = layout.dateBlocks.find((b) => b.date === monday.date);
+    check('排了班的格子带着医生名', monBlock.rows[0].cells[0].name, doctor.name);
+    check('这一格带自定义时间角标', monBlock.rows[0].cells[0].badge, '08:30');
+    checkTrue('空着的格子标成 empty', monBlock.rows[1].cells[1] ? monBlock.rows[1].cells[1].empty : true);
+    checkTrue('周末的日期块被标出来', layout.dateBlocks.some((b) => b.isWeekend), layout.dateBlocks.filter((b) => b.isWeekend).length + ' 天');
+
+    // 点按钮：桩掉 canvas，检查确实画了字、坐标都算对了、确实把 PNG 交给主进程
+    const drawn = [];
+    const badCoords = [];
+    w.HTMLCanvasElement.prototype.getContext = () =>
+      new Proxy(
+        {},
+        {
+          get(target, prop) {
+            if (prop === 'fillText') {
+              return (text, x, y) => {
+                drawn.push(String(text));
+                // 坐标必须是有限数：NaN 会让文字画不出来（这是真出现过的 bug）
+                if (!Number.isFinite(x) || !Number.isFinite(y)) badCoords.push(`${text}@${x},${y}`);
+              };
+            }
+            if (prop === 'measureText') return () => ({ width: 10 });
+            return () => {};
+          },
+          set() {
+            return true;
+          },
+        }
+      );
+    w.HTMLCanvasElement.prototype.toDataURL = () => 'data:image/png;base64,TESTPNG';
+
+    copyBtn.click();
+    await new Promise((r) => setTimeout(r, 200));
+    check('交给主进程的是 PNG dataURL', copied, 'data:image/png;base64,TESTPNG');
+    checkTrue('画布上写了医生姓名', drawn.includes(doctor.name), `共写了 ${drawn.length} 段文字`);
+    checkTrue('画布上写了班次名', drawn.includes('上午') && drawn.includes('下午'), drawn.slice(0, 8).join('|'));
+    checkTrue('画布上写了表头（日期/星期/班次）', ['日期', '星期', '班次'].every((t) => drawn.includes(t)), '');
+    checkTrue('画布上写了诊室名', App.rooms.some((r) => drawn.includes(r.short || r.name)), '');
+    checkTrue('画布上写了标题里的年月', drawn.some((t) => /年/.test(t) && /月/.test(t)), '');
+    checkTrue('画布上写了星期几（不是留空）', drawn.some((t) => /^星期[日一二三四五六]$/.test(t)), '');
+    checkTrue('班次时间是完整的 HH:MM-HH:MM', drawn.some((t) => /^\d{2}:\d{2}-\d{2}:\d{2}$/.test(t)), drawn.filter((t) => t.includes('-')).slice(0, 3).join('|'));
+    check('所有文字的绘制坐标都是有效数字', badCoords.length, 0);
+    checkTrue('日期文字真的画了', drawn.some((t) => /^\d+日$/.test(t)), drawn.filter((t) => /日$/.test(t)).slice(0, 5).join('|'));
   }
 
   console.log('== 诊室 / 科室设置：改动即自动保存并刷新 ==');

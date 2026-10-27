@@ -39,6 +39,8 @@ contextBridge.exposeInMainWorld('api', {
   },
 
   exportMonth: (ym, options) => invoke('export:month', ym, options),
+  /** 把界面画好的排班视图长图（PNG dataURL）写进剪贴板 */
+  copyImage: (dataUrl) => invoke('clipboard:image', dataUrl),
   pickFolder: (defaultPath) => invoke('dialog:pickFolder', defaultPath),
   reveal: (file) => invoke('shell:reveal', file),
   openFile: (file) => invoke('shell:open', file),
